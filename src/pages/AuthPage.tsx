@@ -44,7 +44,7 @@ const AuthPage = () => {
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 text-primary">
             <Clock className="h-8 w-8" />
-            <span className="text-3xl font-bold tracking-tight text-foreground">Chronos</span>
+            <span className="text-3xl font-bold tracking-tight text-foreground">Cadence</span>
           </div>
           <p className="text-muted-foreground">Track your time. Own your productivity.</p>
         </div>
@@ -75,50 +75,24 @@ const AuthPage = () => {
                 <Label htmlFor="name">Display Name</Label>
                 <div className="relative">
                   <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="name"
-                    placeholder="Your name"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="pl-10 bg-secondary border-border"
-                  />
+                  <Input id="name" placeholder="Your name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="pl-10 bg-secondary border-border" />
                 </div>
               </div>
             )}
-
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="pl-10 bg-secondary border-border"
-                />
+                <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required className="pl-10 bg-secondary border-border" />
               </div>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="pl-10 bg-secondary border-border"
-                />
+                <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="pl-10 bg-secondary border-border" />
               </div>
             </div>
-
             <Button type="submit" className="w-full gradient-primary" disabled={loading}>
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
             </Button>
