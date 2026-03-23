@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Square, Camera } from "lucide-react";
+import { Play, Square, Coffee, LogIn, LogOut as LogOutIcon } from "lucide-react";
 
 interface TimerProps {
   taskId?: string;
@@ -25,9 +25,26 @@ const Timer = ({ taskId, projectId, onEntryCreated }: TimerProps) => {
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(null);
-  const [screenshotInterval, setScreenshotInterval] = useState("600");
+  const [mode, setMode] = useState<"work" | "break">("work");
+  const [timedIn, setTimedIn] = useState(false);
+  const [timeInStamp, setTimeInStamp] = useState<Date | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const screenshotTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get screenshot interval from profile (admin-configured)
+  const { data: screenshotInterval = 600 } = useQuery({
+    queryKey: ["profile_screenshot_interval", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("screenshot_interval")
+        .eq("user_id", user!.id)
+        .single();
+      if (error) return 600;
+      return data.screenshot_interval ?? 600;
+    },
+    enabled: !!user,
+  });
 
   useEffect(() => {
     if (isRunning) {
@@ -54,20 +71,20 @@ const Timer = ({ taskId, projectId, onEntryCreated }: TimerProps) => {
         ctx.fillText(`Screenshot taken at ${new Date().toLocaleTimeString()}`, 20, 40);
         ctx.fillText(`Timer: ${formatTime(elapsed)}`, 20, 70);
       }
-      toast({ title: "Screenshot captured", description: `Next in ${parseInt(screenshotInterval) / 60} min` });
+      toast({ title: "Screenshot captured", description: `Next in ${screenshotInterval / 60} min` });
     } catch {
       toast({ title: "Screenshot failed", variant: "destructive" });
     }
   }, [elapsed, screenshotInterval, toast]);
 
   useEffect(() => {
-    if (isRunning && screenshotInterval !== "0") {
-      screenshotTimerRef.current = setInterval(takeScreenshot, parseInt(screenshotInterval) * 1000);
+    if (isRunning && mode === "work" && screenshotInterval > 0) {
+      screenshotTimerRef.current = setInterval(takeScreenshot, screenshotInterval * 1000);
     }
     return () => {
       if (screenshotTimerRef.current) clearInterval(screenshotTimerRef.current);
     };
-  }, [isRunning, screenshotInterval, takeScreenshot]);
+  }, [isRunning, mode, screenshotInterval, takeScreenshot]);
 
   const handleStart = () => {
     setStartTime(new Date());
@@ -79,65 +96,146 @@ const Timer = ({ taskId, projectId, onEntryCreated }: TimerProps) => {
     setIsRunning(false);
     if (!startTime || !user) return;
 
-    const endTime = new Date();
-    const { error } = await supabase.from("time_entries").insert({
-      user_id: user.id,
-      task_id: taskId || null,
-      project_id: projectId || null,
-      start_time: startTime.toISOString(),
-      end_time: endTime.toISOString(),
-      duration_seconds: elapsed,
-      screenshot_interval: parseInt(screenshotInterval),
-    });
+    if (mode === "work") {
+      const endTime = new Date();
+      const { error } = await supabase.from("time_entries").insert({
+        user_id: user.id,
+        task_id: taskId || null,
+        project_id: projectId || null,
+        start_time: startTime.toISOString(),
+        end_time: endTime.toISOString(),
+        duration_seconds: elapsed,
+        screenshot_interval: screenshotInterval,
+      });
 
-    if (error) {
-      toast({ title: "Error saving time entry", description: error.message, variant: "destructive" });
+      if (error) {
+        toast({ title: "Error saving time entry", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Time entry saved!" });
+        onEntryCreated?.();
+      }
     } else {
-      toast({ title: "Time entry saved!" });
-      onEntryCreated?.();
+      toast({ title: "Break ended", description: `Break lasted ${formatTime(elapsed)}` });
     }
     setElapsed(0);
     setStartTime(null);
   };
 
+  const handleTimeIn = () => {
+    setTimedIn(true);
+    setTimeInStamp(new Date());
+    toast({ title: "Timed In!", description: `Started at ${new Date().toLocaleTimeString()}` });
+  };
+
+  const handleTimeOut = async () => {
+    if (!timeInStamp || !user) return;
+    setTimedIn(false);
+    const endTime = new Date();
+    const durationSeconds = Math.floor((endTime.getTime() - timeInStamp.getTime()) / 1000);
+
+    const { error } = await supabase.from("time_entries").insert({
+      user_id: user.id,
+      task_id: taskId || null,
+      project_id: projectId || null,
+      start_time: timeInStamp.toISOString(),
+      end_time: endTime.toISOString(),
+      duration_seconds: durationSeconds,
+      description: "Time In / Time Out entry",
+    });
+
+    if (error) {
+      toast({ title: "Error saving", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Timed Out!", description: `Total: ${formatTime(durationSeconds)}` });
+      onEntryCreated?.();
+    }
+    setTimeInStamp(null);
+  };
+
+  const isBreak = mode === "break";
+
   return (
-    <div className="glass-card p-6 space-y-4">
+    <div className="glass-card p-6 space-y-5">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">Timer</h3>
+        <h3 className="text-lg font-semibold text-foreground">Cadence Clock</h3>
         <div className="flex items-center gap-2">
-          <Camera className="h-4 w-4 text-muted-foreground" />
-          <Select value={screenshotInterval} onValueChange={setScreenshotInterval}>
-            <SelectTrigger className="w-[140px] bg-secondary border-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">No screenshots</SelectItem>
-              <SelectItem value="60">Every 1 min</SelectItem>
-              <SelectItem value="300">Every 5 min</SelectItem>
-              <SelectItem value="600">Every 10 min</SelectItem>
-              <SelectItem value="900">Every 15 min</SelectItem>
-              <SelectItem value="1800">Every 30 min</SelectItem>
-            </SelectContent>
-          </Select>
+          <Button
+            variant={!isBreak ? "default" : "outline"}
+            size="sm"
+            onClick={() => { if (!isRunning) setMode("work"); }}
+            disabled={isRunning}
+            className={!isBreak ? "gradient-primary" : ""}
+          >
+            <Play className="h-3 w-3 mr-1" /> Work
+          </Button>
+          <Button
+            variant={isBreak ? "default" : "outline"}
+            size="sm"
+            onClick={() => { if (!isRunning) setMode("break"); }}
+            disabled={isRunning}
+            className={isBreak ? "bg-warning text-warning-foreground hover:bg-warning/90" : ""}
+          >
+            <Coffee className="h-3 w-3 mr-1" /> Break
+          </Button>
         </div>
       </div>
 
       <div className="text-center">
-        <div className={`timer-display text-5xl font-bold ${isRunning ? "text-primary animate-pulse-glow glow-primary rounded-lg p-4" : "text-foreground p-4"}`}>
+        <div className={`timer-display text-5xl font-bold rounded-lg p-4 ${
+          isRunning
+            ? isBreak
+              ? "text-warning animate-pulse"
+              : "text-primary animate-pulse-glow glow-primary"
+            : "text-foreground"
+        }`}>
           {formatTime(elapsed)}
         </div>
+        {isBreak && <p className="text-sm text-warning mt-1">☕ Break Mode</p>}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-3">
         {isRunning ? (
           <Button onClick={handleStop} variant="destructive" size="lg" className="gap-2">
             <Square className="h-4 w-4" /> Stop
           </Button>
         ) : (
-          <Button onClick={handleStart} size="lg" className="gap-2 gradient-primary">
-            <Play className="h-4 w-4" /> Start
+          <Button onClick={handleStart} size="lg" className={`gap-2 ${isBreak ? "bg-warning text-warning-foreground hover:bg-warning/90" : "gradient-primary"}`}>
+            <Play className="h-4 w-4" /> {isBreak ? "Start Break" : "Start"}
           </Button>
         )}
+      </div>
+
+      {/* Time In / Time Out */}
+      <div className="border-t border-border pt-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-foreground">Attendance</p>
+            {timedIn && timeInStamp && (
+              <p className="text-xs text-muted-foreground">
+                In since {timeInStamp.toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleTimeIn}
+              disabled={timedIn}
+              size="sm"
+              className="gap-1 gradient-primary"
+            >
+              <LogIn className="h-3 w-3" /> Time In
+            </Button>
+            <Button
+              onClick={handleTimeOut}
+              disabled={!timedIn}
+              size="sm"
+              variant="destructive"
+              className="gap-1"
+            >
+              <LogOutIcon className="h-3 w-3" /> Time Out
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
