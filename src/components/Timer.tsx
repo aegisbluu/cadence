@@ -4,22 +4,19 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Play, Square, Coffee, LogIn, LogOut as LogOutIcon, Plus, CheckCircle2, Circle, Trash2 } from "lucide-react";
+import { Play, Square, Coffee, LogIn, LogOut as LogOutIcon, ChevronDown, CheckCircle2, Circle } from "lucide-react";
 
 interface TimerProps {
   projectId?: string;
   onEntryCreated?: () => void;
 }
 
-const formatTime = (seconds: number) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+const formatTime = (s: number) => {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
 };
-const formatHM = (seconds: number) => {
-  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+const formatHM = (s: number) => {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
@@ -28,28 +25,49 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Work timer — DB-persisted so it survives logout/device switch
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [startTime, setStartTime] = useState<Date | null>(null);
   const [mode, setMode] = useState<"work" | "break">("work");
   const [activeTaskId, setActiveTaskId] = useState<string | undefined>();
-  const [newTaskName, setNewTaskName] = useState("");
-  const [showAddTask, setShowAddTask] = useState(false);
+  const [taskDropdownOpen, setTaskDropdownOpen] = useState(false);
   const [timeInElapsed, setTimeInElapsed] = useState(0);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeInIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const screenshotTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // ── Attendance: fully DB-driven, cross-device ──
+  // ── Cadence Clock: restore from active_timers on mount (cross-device) ──
+  const { data: activeTimer, refetch: refetchActiveTimer } = useQuery({
+    queryKey: ["my_active_timer", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("active_timers")
+        .select("*, tasks(name)")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  // On load: if there's a running timer in DB, restore it
+  useEffect(() => {
+    if (activeTimer && !isRunning) {
+      const secondsElapsed = Math.floor((Date.now() - new Date(activeTimer.started_at).getTime()) / 1000);
+      setElapsed(secondsElapsed);
+      setMode(activeTimer.mode as "work" | "break");
+      setActiveTaskId(activeTimer.task_id || undefined);
+      setIsRunning(true);
+    }
+  }, [activeTimer]);
+
+  // ── Attendance: DB-driven, cross-device ──
   const { data: attendance, refetch: refetchAttendance } = useQuery({
     queryKey: ["my_attendance", user?.id],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("attendance")
-        .select("time_in_at")
-        .eq("user_id", user!.id)
-        .maybeSingle();
+      const { data } = await supabase.from("attendance").select("time_in_at").eq("user_id", user!.id).maybeSingle();
       return data;
     },
     enabled: !!user,
@@ -58,7 +76,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
   const timedIn = !!attendance?.time_in_at;
   const timeInStamp = attendance?.time_in_at ? new Date(attendance.time_in_at) : null;
 
-  // Live ticker for Time In elapsed — recalculates from DB timestamp every second
+  // Time In live ticker
   useEffect(() => {
     if (timedIn && timeInStamp) {
       const tick = () => setTimeInElapsed(Math.floor((Date.now() - timeInStamp.getTime()) / 1000));
@@ -71,55 +89,25 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     return () => { if (timeInIntervalRef.current) clearInterval(timeInIntervalRef.current); };
   }, [timedIn, timeInStamp?.toISOString()]);
 
-  const timeInMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("attendance")
-        .upsert({ user_id: user!.id, time_in_at: new Date().toISOString() }, { onConflict: "user_id" });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["my_attendance"] });
-      refetchAttendance();
-      toast({ title: "Timed In!", description: `Started at ${new Date().toLocaleTimeString()}` });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
+  // Work timer tick
+  useEffect(() => {
+    if (isRunning) {
+      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [isRunning]);
 
-  const timeOutMutation = useMutation({
-    mutationFn: async () => {
-      if (!timeInStamp || !user) throw new Error("Not timed in");
-      const endTime = new Date();
-      const durationSeconds = Math.floor((endTime.getTime() - timeInStamp.getTime()) / 1000);
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setTaskDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
-      // Save the full attendance session as a time entry
-      const { error: entryError } = await supabase.from("time_entries").insert({
-        user_id: user.id,
-        task_id: null,
-        project_id: projectId || null,
-        start_time: timeInStamp.toISOString(),
-        end_time: endTime.toISOString(),
-        duration_seconds: durationSeconds,
-        description: "Attendance: Time In / Time Out",
-      });
-      if (entryError) throw entryError;
-
-      // Remove attendance row
-      const { error: delError } = await supabase.from("attendance").delete().eq("user_id", user.id);
-      if (delError) throw delError;
-
-      return durationSeconds;
-    },
-    onSuccess: (durationSeconds) => {
-      queryClient.invalidateQueries({ queryKey: ["my_attendance"] });
-      refetchAttendance();
-      onEntryCreated?.();
-      toast({ title: "Timed Out!", description: `Total: ${formatTime(durationSeconds)}` });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
-
-  // ── Screenshot interval ──
   const { data: screenshotInterval = 600 } = useQuery({
     queryKey: ["profile_screenshot_interval", user?.id],
     queryFn: async () => {
@@ -130,11 +118,11 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     enabled: !!user,
   });
 
-  // ── Tasks ──
+  // Tasks from admin panel (all tasks, filtered by project if selected)
   const { data: tasks = [] } = useQuery({
     queryKey: ["tasks", projectId],
     queryFn: async () => {
-      let q = supabase.from("tasks").select("*").order("created_at", { ascending: false });
+      let q = supabase.from("tasks").select("*").eq("is_completed", false).order("created_at", { ascending: false });
       if (projectId) q = q.eq("project_id", projectId);
       const { data, error } = await q;
       if (error) throw error;
@@ -156,46 +144,6 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     },
     enabled: !!user,
   });
-
-  const createTaskMutation = useMutation({
-    mutationFn: async (name: string) => {
-      if (!user) throw new Error("Not authenticated");
-      const { error } = await supabase.from("tasks").insert({ user_id: user.id, name, category: "Other", project_id: projectId || null });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      setNewTaskName(""); setShowAddTask(false);
-      toast({ title: "Task added!" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
-
-  const toggleTaskMutation = useMutation({
-    mutationFn: async ({ id, completed }: { id: string; completed: boolean }) => {
-      const { error } = await supabase.from("tasks").update({ is_completed: completed }).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
-  });
-
-  const deleteTaskMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("tasks").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
-  });
-
-  // ── Work timer ──
-  useEffect(() => {
-    if (isRunning) {
-      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isRunning]);
 
   const takeScreenshot = useCallback(async () => {
     try {
@@ -220,41 +168,85 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
   }, [isRunning, mode, screenshotInterval, takeScreenshot]);
 
   const handleStart = async () => {
-    setStartTime(new Date()); setElapsed(0); setIsRunning(true);
+    if (!activeTaskId && mode === "work") {
+      toast({ title: "Select a task first", description: "Please pick a task before starting the timer.", variant: "destructive" });
+      return;
+    }
+    const now = new Date();
+    setElapsed(0); setIsRunning(true);
     if (user) {
       await supabase.from("active_timers").upsert({
-        user_id: user.id, started_at: new Date().toISOString(),
+        user_id: user.id, started_at: now.toISOString(),
         task_id: activeTaskId || null, project_id: projectId || null, mode,
       }, { onConflict: "user_id" });
     }
   };
 
   const handleStop = async () => {
+    if (!activeTaskId && mode === "work") return; // guard: can't stop without a task
     setIsRunning(false);
+    const startedAt = activeTimer?.started_at ? new Date(activeTimer.started_at) : new Date(Date.now() - elapsed * 1000);
     if (user) await supabase.from("active_timers").delete().eq("user_id", user.id);
-    if (!startTime || !user) return;
+    if (!user) return;
     if (mode === "work") {
       const endTime = new Date();
       const { error } = await supabase.from("time_entries").insert({
         user_id: user.id, task_id: activeTaskId || null, project_id: projectId || null,
-        start_time: startTime.toISOString(), end_time: endTime.toISOString(),
+        start_time: startedAt.toISOString(), end_time: endTime.toISOString(),
         duration_seconds: elapsed, screenshot_interval: screenshotInterval,
       });
       if (error) { toast({ title: "Error saving", description: error.message, variant: "destructive" }); }
       else { toast({ title: "Time entry saved!" }); queryClient.invalidateQueries({ queryKey: ["task_durations"] }); onEntryCreated?.(); }
-    } else {
-      toast({ title: "Break ended", description: `Break lasted ${formatTime(elapsed)}` });
-    }
-    setElapsed(0); setStartTime(null);
+    } else { toast({ title: "Break ended", description: `Break lasted ${formatTime(elapsed)}` }); }
+    setElapsed(0);
+    refetchActiveTimer();
   };
 
+  const timeInMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("attendance").upsert({ user_id: user!.id, time_in_at: new Date().toISOString() }, { onConflict: "user_id" });
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["my_attendance"] }); refetchAttendance(); toast({ title: "Timed In!", description: `Started at ${new Date().toLocaleTimeString()}` }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const timeOutMutation = useMutation({
+    mutationFn: async () => {
+      if (!timeInStamp || !user) throw new Error("Not timed in");
+      const endTime = new Date();
+      const durationSeconds = Math.floor((endTime.getTime() - timeInStamp.getTime()) / 1000);
+      const { error: entryError } = await supabase.from("time_entries").insert({
+        user_id: user.id, task_id: null, project_id: projectId || null,
+        start_time: timeInStamp.toISOString(), end_time: endTime.toISOString(),
+        duration_seconds: durationSeconds, description: "Attendance: Time In / Time Out",
+      });
+      if (entryError) throw entryError;
+      const { error: delError } = await supabase.from("attendance").delete().eq("user_id", user.id);
+      if (delError) throw delError;
+      return durationSeconds;
+    },
+    onSuccess: (dur) => { queryClient.invalidateQueries({ queryKey: ["my_attendance"] }); refetchAttendance(); onEntryCreated?.(); toast({ title: "Timed Out!", description: `Total: ${formatTime(dur)}` }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const isBreak = mode === "break";
+  const activeTask = tasks.find(t => t.id === activeTaskId);
+  const canStop = isBreak || !!activeTaskId;
 
   return (
     <div className="glass-card p-6 space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">Cadence Clock</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground">Cadence Clock</h3>
+          {/* Online indicator: green if timed in + clock running, yellow if timed in but clock idle, grey if not timed in */}
+          <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+            !timedIn ? "bg-muted-foreground/40" :
+            isRunning ? "bg-green-500 animate-pulse" :
+            "bg-yellow-400"
+          }`} title={!timedIn ? "Offline" : isRunning ? "Online — tracking" : "Online — idle"} />
+        </div>
         <div className="flex items-center gap-2">
           <Button variant={!isBreak ? "default" : "outline"} size="sm" onClick={() => { if (!isRunning) setMode("work"); }} disabled={isRunning} className={!isBreak ? "gradient-primary" : ""}>
             <Play className="h-3 w-3 mr-1" /> Work
@@ -273,66 +265,102 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         {isBreak && <p className="text-sm text-warning mt-1">☕ Break Mode</p>}
       </div>
 
+      {/* Task dropdown — required before starting (work mode) */}
+      {!isBreak && (
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setTaskDropdownOpen(v => !v)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+              activeTask ? "border-primary/50 bg-accent/30 text-foreground" : "border-border bg-secondary text-muted-foreground"
+            } ${isRunning ? "opacity-60 cursor-not-allowed" : "hover:bg-secondary/80 cursor-pointer"}`}
+            disabled={isRunning}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              {activeTask
+                ? <><CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" /><span className="truncate font-medium text-foreground">{activeTask.name}</span></>
+                : <><Circle className="h-4 w-4 flex-shrink-0" /><span>Select a task to track…</span></>
+              }
+            </div>
+            <ChevronDown className={`h-4 w-4 flex-shrink-0 ml-2 transition-transform ${taskDropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {taskDropdownOpen && !isRunning && (
+            <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+              <div className="max-h-52 overflow-y-auto">
+                <button
+                  onClick={() => { setActiveTaskId(undefined); setTaskDropdownOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}
+                >
+                  <Circle className="h-3.5 w-3.5" /> None
+                </button>
+                {tasks.map(t => {
+                  const tracked = ((taskDurations as any)[t.id] || 0);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => { setActiveTaskId(t.id); setTaskDropdownOpen(false); }}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-secondary ${activeTaskId === t.id ? "bg-accent/30 text-primary" : "text-foreground"}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className={`h-3.5 w-3.5 flex-shrink-0 ${activeTaskId === t.id ? "text-primary" : "text-muted-foreground"}`} />
+                        <span className="truncate">{t.name}</span>
+                        {t.category && <span className="text-xs text-muted-foreground flex-shrink-0">· {t.category}</span>}
+                      </div>
+                      {tracked > 0 && <span className="text-xs font-mono text-muted-foreground ml-2 flex-shrink-0">{formatHM(tracked)}</span>}
+                    </button>
+                  );
+                })}
+                {tasks.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">No tasks — add them in Admin Panel</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Controls */}
       <div className="flex justify-center gap-3">
         {isRunning ? (
-          <Button onClick={handleStop} variant="destructive" size="lg" className="gap-2"><Square className="h-4 w-4" /> Stop</Button>
+          <Button
+            onClick={handleStop}
+            variant="destructive"
+            size="lg"
+            className="gap-2"
+            disabled={!canStop}
+            title={!canStop ? "Select a task before stopping" : undefined}
+          >
+            <Square className="h-4 w-4" /> Stop
+          </Button>
         ) : (
-          <Button onClick={handleStart} size="lg" className={`gap-2 ${isBreak ? "bg-warning text-warning-foreground hover:bg-warning/90" : "gradient-primary"}`}>
+          <Button
+            onClick={handleStart}
+            size="lg"
+            className={`gap-2 ${isBreak ? "bg-warning text-warning-foreground hover:bg-warning/90" : "gradient-primary"}`}
+            disabled={!isBreak && !activeTaskId}
+            title={!isBreak && !activeTaskId ? "Select a task first" : undefined}
+          >
             <Play className="h-4 w-4" /> {isBreak ? "Start Break" : "Start"}
           </Button>
         )}
       </div>
 
-      {/* Tasks */}
-      <div className="border-t border-border pt-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-foreground">Tasks</p>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowAddTask((v) => !v)}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-        {showAddTask && (
-          <div className="flex gap-2">
-            <Input placeholder="New task name..." value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && newTaskName.trim() && createTaskMutation.mutate(newTaskName.trim())}
-              className="bg-secondary border-border text-sm h-8" autoFocus />
-            <Button size="sm" onClick={() => newTaskName.trim() && createTaskMutation.mutate(newTaskName.trim())} disabled={!newTaskName.trim()} className="gradient-primary h-8 px-3">Add</Button>
-          </div>
-        )}
-        <div className="space-y-1 max-h-[260px] overflow-y-auto">
-          {tasks.map((t) => {
-            const tracked = ((taskDurations as any)[t.id] || 0) + (isRunning && activeTaskId === t.id ? elapsed : 0);
-            const isActive = activeTaskId === t.id;
-            return (
-              <div key={t.id} className={`flex items-center group gap-2 px-2 py-1.5 rounded-md transition-colors ${isActive ? "bg-accent" : "hover:bg-secondary"}`}>
-                <button onClick={() => toggleTaskMutation.mutate({ id: t.id, completed: !t.is_completed })} className="flex-shrink-0">
-                  {t.is_completed ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
-                </button>
-                <button onClick={() => setActiveTaskId(isActive ? undefined : t.id)} className="flex-1 text-left">
-                  <span className={`text-sm ${isActive ? "text-accent-foreground font-medium" : "text-foreground"}`}>{t.name}</span>
-                  {t.category && <span className="block text-xs text-muted-foreground">{t.category}</span>}
-                </button>
-                {tracked > 0 && <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">{formatHM(tracked)}</span>}
-                <Button variant="ghost" size="icon" onClick={() => deleteTaskMutation.mutate(t.id)} className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive flex-shrink-0">
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            );
-          })}
-          {tasks.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">No tasks yet — add one above</p>}
-        </div>
-        {activeTaskId && <p className="text-xs text-primary text-center">Tracking: <span className="font-medium">{tasks.find(t => t.id === activeTaskId)?.name}</span></p>}
-      </div>
+      {/* Active task tracker info */}
+      {isRunning && activeTask && (
+        <p className="text-xs text-primary text-center">
+          Tracking: <span className="font-medium">{activeTask.name}</span>
+          {activeTaskId && (taskDurations as any)[activeTaskId] > 0 && (
+            <span className="text-muted-foreground"> · {formatHM(((taskDurations as any)[activeTaskId] || 0) + elapsed)} total</span>
+          )}
+        </p>
+      )}
 
-      {/* Attendance — fully DB-driven, works across devices */}
+      {/* Attendance — DB-driven, persists across devices & logout */}
       <div className="border-t border-border pt-4">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-foreground">Attendance</p>
             {timedIn && timeInStamp ? (
               <div>
-                <p className="text-xs text-muted-foreground">In since {timeInStamp.toLocaleTimeString()}</p>
+                <p className="text-xs text-muted-foreground">In since {timeInStamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
                 <p className="text-sm font-mono text-primary font-medium">{formatTime(timeInElapsed)}</p>
               </div>
             ) : (
