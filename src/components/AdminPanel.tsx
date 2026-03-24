@@ -152,7 +152,7 @@ const AdminPanel = () => {
       const { error } = await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       if (error) throw error;
       // Remove other roles
-      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
+      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role as "admin" | "user");
       if (delErr) throw delErr;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
