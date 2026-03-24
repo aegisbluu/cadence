@@ -4,7 +4,6 @@ import { useRole } from "@/hooks/useRole";
 import { useQueryClient } from "@tanstack/react-query";
 import Timer from "@/components/Timer";
 import ProjectList from "@/components/ProjectList";
-import TaskList from "@/components/TaskList";
 import Reports from "@/components/Reports";
 import AdminPanel from "@/components/AdminPanel";
 import { Button } from "@/components/ui/button";
@@ -15,7 +14,6 @@ const Dashboard = () => {
   const { isAdmin } = useRole();
   const queryClient = useQueryClient();
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const [view, setView] = useState<"timer" | "reports" | "admin">("timer");
 
   return (
@@ -26,36 +24,19 @@ const Dashboard = () => {
             <Clock className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold text-foreground">Cadence</span>
           </div>
-
           <nav className="flex items-center gap-1 bg-secondary rounded-lg p-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setView("timer")}
-              className={view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}
-            >
+            <Button variant="ghost" size="sm" onClick={() => setView("timer")} className={view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
               <LayoutDashboard className="h-4 w-4 mr-1" /> Track
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setView("reports")}
-              className={view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}
-            >
+            <Button variant="ghost" size="sm" onClick={() => setView("reports")} className={view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
               <BarChart3 className="h-4 w-4 mr-1" /> Reports
             </Button>
             {isAdmin && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setView("admin")}
-                className={view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setView("admin")} className={view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
                 <Shield className="h-4 w-4 mr-1" /> Admin
               </Button>
             )}
           </nav>
-
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground hidden sm:block">{user?.email}</span>
             <Button variant="ghost" size="icon" onClick={signOut} className="text-muted-foreground hover:text-foreground">
@@ -64,24 +45,14 @@ const Dashboard = () => {
           </div>
         </div>
       </header>
-
       <main className="container mx-auto px-4 py-6">
         {view === "timer" ? (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-1 space-y-4">
+            <div className="lg:col-span-1">
               <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
-              <TaskList
-                selectedProjectId={selectedProjectId}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={setSelectedTaskId}
-              />
             </div>
             <div className="lg:col-span-3">
-              <Timer
-                taskId={selectedTaskId}
-                projectId={selectedProjectId}
-                onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })}
-              />
+              <Timer projectId={selectedProjectId} onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })} />
             </div>
           </div>
         ) : view === "reports" ? (
