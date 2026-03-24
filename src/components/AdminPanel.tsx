@@ -92,10 +92,20 @@ const AdminPanel = () => {
     refetchInterval: 5000,
   });
 
+  const { data: allAttendance = [] } = useQuery({
+    queryKey: ["admin_attendance"],
+    queryFn: async () => { const { data, error } = await supabase.from("attendance").select("user_id, time_in_at"); if (error) return []; return data; },
+    enabled: !!user,
+    refetchInterval: 5000,
+  });
+
   useEffect(() => {
-    const channel = supabase.channel("admin-active-timers")
+    const channel = supabase.channel("admin-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "active_timers" }, () => {
         queryClient.invalidateQueries({ queryKey: ["admin_active_timers"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["admin_attendance"] });
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
@@ -152,7 +162,7 @@ const AdminPanel = () => {
       const { error } = await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       if (error) throw error;
       // Remove other roles
-      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role as "admin" | "user");
+      const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
       if (delErr) throw delErr;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
@@ -162,6 +172,10 @@ const AdminPanel = () => {
   const departments = Array.from(new Set((allProfiles as any[]).map((p) => p.department || "Unassigned"))).sort() as string[];
   const activeTimerMap: Record<string, any> = {};
   for (const t of activeTimers as any[]) activeTimerMap[t.user_id] = t;
+
+  // attendanceMap: who has timed in
+  const attendanceMap: Record<string, any> = {};
+  for (const a of allAttendance as any[]) attendanceMap[a.user_id] = a;
 
   const getRoleForUser = (userId: string) => {
     const r = (allRoles as any[]).find((r) => r.user_id === userId);
@@ -191,7 +205,7 @@ const AdminPanel = () => {
               { label: "Total members", value: (allProfiles as any[]).length },
               { label: "Active today", value: Object.values(memberStats as any).filter((s: any) => s.today > 0).length },
               { label: "Departments", value: departments.filter(d => d !== "Unassigned").length },
-              { label: "Currently live", value: (activeTimers as any[]).filter(t => t.mode === "work").length },
+              { label: "Currently online", value: (allAttendance as any[]).length },
             ].map(({ label, value }) => (
               <div key={label} className="glass-card p-3 text-center">
                 <p className="text-xs text-muted-foreground mb-1">{label}</p>
@@ -218,7 +232,11 @@ const AdminPanel = () => {
                     <div key={p.id} className={`rounded-lg border p-3 transition-all ${timer ? "border-primary/30 bg-accent/20" : "border-border bg-secondary/40"}`}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${timer ? "bg-green-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${
+                              !attendanceMap[p.user_id] ? "bg-muted-foreground/40" :
+                              timer ? "bg-green-500 animate-pulse" :
+                              "bg-yellow-400"
+                            }`} title={!attendanceMap[p.user_id] ? "Offline" : timer ? "Online — tracking" : "Online — idle"} />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-foreground">{p.display_name || "Unnamed"}</p>
                             {isEditing ? (
@@ -297,7 +315,11 @@ const AdminPanel = () => {
               const isOnBreak = timer?.mode === "break";
               return (
                 <div key={p.user_id} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${timer ? isOnBreak ? "border-warning/40 bg-warning/5" : "border-primary/30 bg-accent/20" : "border-border bg-secondary/30 opacity-60"}`}>
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${timer ? isOnBreak ? "bg-warning animate-pulse" : "bg-green-500 animate-pulse" : "bg-muted-foreground/30"}`} />
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                  !attendanceMap[p.user_id] ? "bg-muted-foreground/30" :
+                  timer ? isOnBreak ? "bg-warning animate-pulse" : "bg-green-500 animate-pulse" :
+                  "bg-yellow-400"
+                }`} title={!attendanceMap[p.user_id] ? "Offline" : timer ? "Online — tracking" : "Online — idle"} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}</p>
                     <p className="text-xs text-muted-foreground truncate">{p.job_title || "—"}{p.department ? ` · ${p.department}` : ""}</p>
@@ -307,7 +329,11 @@ const AdminPanel = () => {
                       <p className={`font-mono text-sm font-medium ${isOnBreak ? "text-warning" : "text-primary"}`}>{fmt(liveElapsed)}</p>
                       <p className="text-xs text-muted-foreground">{isOnBreak ? "☕ Break" : (timer.tasks as any)?.name || "Working"}</p>
                     </div>
-                  ) : <span className="text-xs text-muted-foreground">Offline</span>}
+                  ) : attendanceMap[p.user_id] ? (
+                    <span className="text-xs text-yellow-400">Idle</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Offline</span>
+                  )}
                 </div>
               );
             })}
