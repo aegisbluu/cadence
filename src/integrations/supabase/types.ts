@@ -21,6 +21,7 @@ export type Database = {
           project_id: string | null
           started_at: string
           task_id: string | null
+          time_in_at: string | null
           updated_at: string
           user_id: string
         }
@@ -30,6 +31,7 @@ export type Database = {
           project_id?: string | null
           started_at?: string
           task_id?: string | null
+          time_in_at?: string | null
           updated_at?: string
           user_id: string
         }
@@ -39,6 +41,7 @@ export type Database = {
           project_id?: string | null
           started_at?: string
           task_id?: string | null
+          time_in_at?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -58,6 +61,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      attendance: {
+        Row: {
+          created_at: string
+          id: string
+          time_in_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          time_in_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          time_in_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
