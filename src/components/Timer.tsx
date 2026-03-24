@@ -16,32 +16,110 @@ const formatTime = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 };
-
 const formatHM = (seconds: number) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
 const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
   const [isRunning, setIsRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [mode, setMode] = useState<"work" | "break">("work");
-  const [timedIn, setTimedIn] = useState(false);
-  const [timeInStamp, setTimeInStamp] = useState<Date | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | undefined>();
   const [newTaskName, setNewTaskName] = useState("");
   const [showAddTask, setShowAddTask] = useState(false);
+  const [timeInElapsed, setTimeInElapsed] = useState(0);
+
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeInIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const screenshotTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ── Attendance: fully DB-driven, cross-device ──
+  const { data: attendance, refetch: refetchAttendance } = useQuery({
+    queryKey: ["my_attendance", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("attendance")
+        .select("time_in_at")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const timedIn = !!attendance?.time_in_at;
+  const timeInStamp = attendance?.time_in_at ? new Date(attendance.time_in_at) : null;
+
+  // Live ticker for Time In elapsed — recalculates from DB timestamp every second
+  useEffect(() => {
+    if (timedIn && timeInStamp) {
+      const tick = () => setTimeInElapsed(Math.floor((Date.now() - timeInStamp.getTime()) / 1000));
+      tick();
+      timeInIntervalRef.current = setInterval(tick, 1000);
+    } else {
+      if (timeInIntervalRef.current) clearInterval(timeInIntervalRef.current);
+      setTimeInElapsed(0);
+    }
+    return () => { if (timeInIntervalRef.current) clearInterval(timeInIntervalRef.current); };
+  }, [timedIn, timeInStamp?.toISOString()]);
+
+  const timeInMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("attendance")
+        .upsert({ user_id: user!.id, time_in_at: new Date().toISOString() }, { onConflict: "user_id" });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my_attendance"] });
+      refetchAttendance();
+      toast({ title: "Timed In!", description: `Started at ${new Date().toLocaleTimeString()}` });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const timeOutMutation = useMutation({
+    mutationFn: async () => {
+      if (!timeInStamp || !user) throw new Error("Not timed in");
+      const endTime = new Date();
+      const durationSeconds = Math.floor((endTime.getTime() - timeInStamp.getTime()) / 1000);
+
+      // Save the full attendance session as a time entry
+      const { error: entryError } = await supabase.from("time_entries").insert({
+        user_id: user.id,
+        task_id: null,
+        project_id: projectId || null,
+        start_time: timeInStamp.toISOString(),
+        end_time: endTime.toISOString(),
+        duration_seconds: durationSeconds,
+        description: "Attendance: Time In / Time Out",
+      });
+      if (entryError) throw entryError;
+
+      // Remove attendance row
+      const { error: delError } = await supabase.from("attendance").delete().eq("user_id", user.id);
+      if (delError) throw delError;
+
+      return durationSeconds;
+    },
+    onSuccess: (durationSeconds) => {
+      queryClient.invalidateQueries({ queryKey: ["my_attendance"] });
+      refetchAttendance();
+      onEntryCreated?.();
+      toast({ title: "Timed Out!", description: `Total: ${formatTime(durationSeconds)}` });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // ── Screenshot interval ──
   const { data: screenshotInterval = 600 } = useQuery({
     queryKey: ["profile_screenshot_interval", user?.id],
     queryFn: async () => {
@@ -52,6 +130,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     enabled: !!user,
   });
 
+  // ── Tasks ──
   const { data: tasks = [] } = useQuery({
     queryKey: ["tasks", projectId],
     queryFn: async () => {
@@ -86,8 +165,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      setNewTaskName("");
-      setShowAddTask(false);
+      setNewTaskName(""); setShowAddTask(false);
       toast({ title: "Task added!" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -109,6 +187,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
+  // ── Work timer ──
   useEffect(() => {
     if (isRunning) {
       intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -140,10 +219,19 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
     return () => { if (screenshotTimerRef.current) clearInterval(screenshotTimerRef.current); };
   }, [isRunning, mode, screenshotInterval, takeScreenshot]);
 
-  const handleStart = () => { setStartTime(new Date()); setElapsed(0); setIsRunning(true); };
+  const handleStart = async () => {
+    setStartTime(new Date()); setElapsed(0); setIsRunning(true);
+    if (user) {
+      await supabase.from("active_timers").upsert({
+        user_id: user.id, started_at: new Date().toISOString(),
+        task_id: activeTaskId || null, project_id: projectId || null, mode,
+      }, { onConflict: "user_id" });
+    }
+  };
 
   const handleStop = async () => {
     setIsRunning(false);
+    if (user) await supabase.from("active_timers").delete().eq("user_id", user.id);
     if (!startTime || !user) return;
     if (mode === "work") {
       const endTime = new Date();
@@ -154,31 +242,17 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
       });
       if (error) { toast({ title: "Error saving", description: error.message, variant: "destructive" }); }
       else { toast({ title: "Time entry saved!" }); queryClient.invalidateQueries({ queryKey: ["task_durations"] }); onEntryCreated?.(); }
-    } else { toast({ title: "Break ended", description: `Break lasted ${formatTime(elapsed)}` }); }
+    } else {
+      toast({ title: "Break ended", description: `Break lasted ${formatTime(elapsed)}` });
+    }
     setElapsed(0); setStartTime(null);
-  };
-
-  const handleTimeIn = () => { setTimedIn(true); setTimeInStamp(new Date()); toast({ title: "Timed In!", description: `Started at ${new Date().toLocaleTimeString()}` }); };
-
-  const handleTimeOut = async () => {
-    if (!timeInStamp || !user) return;
-    setTimedIn(false);
-    const endTime = new Date();
-    const durationSeconds = Math.floor((endTime.getTime() - timeInStamp.getTime()) / 1000);
-    const { error } = await supabase.from("time_entries").insert({
-      user_id: user.id, task_id: null, project_id: projectId || null,
-      start_time: timeInStamp.toISOString(), end_time: endTime.toISOString(),
-      duration_seconds: durationSeconds, description: "Time In / Time Out entry",
-    });
-    if (error) { toast({ title: "Error saving", description: error.message, variant: "destructive" }); }
-    else { toast({ title: "Timed Out!", description: `Total: ${formatTime(durationSeconds)}` }); onEntryCreated?.(); }
-    setTimeInStamp(null);
   };
 
   const isBreak = mode === "break";
 
   return (
     <div className="glass-card p-6 space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">Cadence Clock</h3>
         <div className="flex items-center gap-2">
@@ -191,6 +265,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         </div>
       </div>
 
+      {/* Clock */}
       <div className="text-center">
         <div className={`timer-display text-5xl font-bold rounded-lg p-4 ${isRunning ? isBreak ? "text-warning animate-pulse" : "text-primary animate-pulse-glow glow-primary" : "text-foreground"}`}>
           {formatTime(elapsed)}
@@ -198,6 +273,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         {isBreak && <p className="text-sm text-warning mt-1">☕ Break Mode</p>}
       </div>
 
+      {/* Controls */}
       <div className="flex justify-center gap-3">
         {isRunning ? (
           <Button onClick={handleStop} variant="destructive" size="lg" className="gap-2"><Square className="h-4 w-4" /> Stop</Button>
@@ -208,6 +284,7 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         )}
       </div>
 
+      {/* Tasks */}
       <div className="border-t border-border pt-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-foreground">Tasks</p>
@@ -217,13 +294,15 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         </div>
         {showAddTask && (
           <div className="flex gap-2">
-            <Input placeholder="New task name..." value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && newTaskName.trim() && createTaskMutation.mutate(newTaskName.trim())} className="bg-secondary border-border text-sm h-8" autoFocus />
+            <Input placeholder="New task name..." value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && newTaskName.trim() && createTaskMutation.mutate(newTaskName.trim())}
+              className="bg-secondary border-border text-sm h-8" autoFocus />
             <Button size="sm" onClick={() => newTaskName.trim() && createTaskMutation.mutate(newTaskName.trim())} disabled={!newTaskName.trim()} className="gradient-primary h-8 px-3">Add</Button>
           </div>
         )}
         <div className="space-y-1 max-h-[260px] overflow-y-auto">
           {tasks.map((t) => {
-            const tracked = (taskDurations[t.id] || 0) + (isRunning && activeTaskId === t.id ? elapsed : 0);
+            const tracked = ((taskDurations as any)[t.id] || 0) + (isRunning && activeTaskId === t.id ? elapsed : 0);
             const isActive = activeTaskId === t.id;
             return (
               <div key={t.id} className={`flex items-center group gap-2 px-2 py-1.5 rounded-md transition-colors ${isActive ? "bg-accent" : "hover:bg-secondary"}`}>
@@ -246,15 +325,27 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
         {activeTaskId && <p className="text-xs text-primary text-center">Tracking: <span className="font-medium">{tasks.find(t => t.id === activeTaskId)?.name}</span></p>}
       </div>
 
+      {/* Attendance — fully DB-driven, works across devices */}
       <div className="border-t border-border pt-4">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-foreground">Attendance</p>
-            {timedIn && timeInStamp && <p className="text-xs text-muted-foreground">In since {timeInStamp.toLocaleTimeString()}</p>}
+            {timedIn && timeInStamp ? (
+              <div>
+                <p className="text-xs text-muted-foreground">In since {timeInStamp.toLocaleTimeString()}</p>
+                <p className="text-sm font-mono text-primary font-medium">{formatTime(timeInElapsed)}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Not timed in</p>
+            )}
           </div>
           <div className="flex gap-2">
-            <Button onClick={handleTimeIn} disabled={timedIn} size="sm" className="gap-1 gradient-primary"><LogIn className="h-3 w-3" /> Time In</Button>
-            <Button onClick={handleTimeOut} disabled={!timedIn} size="sm" variant="destructive" className="gap-1"><LogOutIcon className="h-3 w-3" /> Time Out</Button>
+            <Button onClick={() => timeInMutation.mutate()} disabled={timedIn || timeInMutation.isPending} size="sm" className="gap-1 gradient-primary">
+              <LogIn className="h-3 w-3" /> Time In
+            </Button>
+            <Button onClick={() => timeOutMutation.mutate()} disabled={!timedIn || timeOutMutation.isPending} size="sm" variant="destructive" className="gap-1">
+              <LogOutIcon className="h-3 w-3" /> Time Out
+            </Button>
           </div>
         </div>
       </div>
