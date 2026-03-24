@@ -13,7 +13,7 @@ const formatDuration = (seconds: number) => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-const Reports = () => {
+const Reports = ({ projectId }: { projectId?: string }) => {
   const { user } = useAuth();
   const [range, setRange] = useState("week");
 
