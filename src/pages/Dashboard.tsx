@@ -8,7 +8,7 @@ import ProjectList from "@/components/ProjectList";
 import Reports from "@/components/Reports";
 import AdminPanel from "@/components/AdminPanel";
 import { Button } from "@/components/ui/button";
-import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown } from "lucide-react";
+import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown, Home } from "lucide-react";
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();
@@ -36,30 +36,32 @@ const Dashboard = () => {
 
   const displayName = profile?.display_name || user?.email || "";
 
+  // Left sidebar nav — shown on all non-admin views
+  const SidebarNav = () => (
+    <div className="glass-card p-3 space-y-1">
+      <button onClick={() => setView("timer")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+        <LayoutDashboard className="h-4 w-4" /> Track
+      </button>
+      <button onClick={() => setView("reports")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+        <BarChart3 className="h-4 w-4" /> Reports
+      </button>
+      {isAdmin && (
+        <button onClick={() => setView("admin")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+          <Shield className="h-4 w-4" /> Admin
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className={`min-h-screen bg-background ${theme === "light" ? "light-mode" : ""}`}>
-      {/* Header */}
+      {/* Header — no Track/Reports/Admin nav here anymore */}
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold text-foreground">Cadence</span>
           </div>
-
-          {/* Only Admin tab in top nav — Track/Reports moved to sidebar */}
-          <nav className="flex items-center gap-1 bg-secondary rounded-lg p-1">
-            <Button variant="ghost" size="sm" onClick={() => setView("timer")} className={view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
-              <LayoutDashboard className="h-4 w-4 mr-1" /> Track
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setView("reports")} className={view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
-              <BarChart3 className="h-4 w-4 mr-1" /> Reports
-            </Button>
-            {isAdmin && (
-              <Button variant="ghost" size="sm" onClick={() => setView("admin")} className={view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}>
-                <Shield className="h-4 w-4 mr-1" /> Admin
-              </Button>
-            )}
-          </nav>
 
           {/* User menu */}
           <div className="relative flex items-center gap-2">
@@ -132,45 +134,32 @@ const Dashboard = () => {
 
       <main className="container mx-auto px-4 py-6">
         {view === "admin" ? (
-          <AdminPanel />
+          /* Admin full-width with Home button at top */
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => setView("timer")} className="gap-2">
+                <Home className="h-4 w-4" /> Home
+              </Button>
+              <span className="text-sm text-muted-foreground">Admin Dashboard</span>
+            </div>
+            <AdminPanel />
+          </div>
         ) : view === "reports" ? (
-          /* Reports: left col = projects filter, right = reports */
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <div className="lg:col-span-1 space-y-4">
               <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
+              <SidebarNav />
             </div>
             <div className="lg:col-span-3">
               <Reports projectId={selectedProjectId} />
             </div>
           </div>
         ) : (
-          /* Track: left col = projects + nav links stacked, right = Cadence Clock */
+          /* Track view */
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <div className="lg:col-span-1 space-y-4">
               <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
-              {/* Stacked nav shortcuts */}
-              <div className="glass-card p-3 space-y-1">
-                <button
-                  onClick={() => setView("timer")}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}
-                >
-                  <LayoutDashboard className="h-4 w-4" /> Track
-                </button>
-                <button
-                  onClick={() => setView("reports")}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}
-                >
-                  <BarChart3 className="h-4 w-4" /> Reports
-                </button>
-                {isAdmin && (
-                  <button
-                    onClick={() => setView("admin")}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}
-                  >
-                    <Shield className="h-4 w-4" /> Admin
-                  </button>
-                )}
-              </div>
+              <SidebarNav />
             </div>
             <div className="lg:col-span-3">
               <Timer
