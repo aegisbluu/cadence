@@ -87,3 +87,26 @@
     letter-spacing: 0.05em;
   }
 }
+
+/* Light mode override */
+.light-mode {
+  --background: 0 0% 96%;
+  --foreground: 240 6% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 6% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 6% 10%;
+  --primary: 270 70% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 4% 90%;
+  --secondary-foreground: 240 6% 20%;
+  --muted: 240 4% 88%;
+  --muted-foreground: 240 5% 40%;
+  --accent: 270 50% 88%;
+  --accent-foreground: 270 70% 35%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 4% 82%;
+  --input: 240 4% 82%;
+  --ring: 270 70% 55%;
+}
