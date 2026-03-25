@@ -16,7 +16,9 @@ export type Database = {
     Tables: {
       active_timers: {
         Row: {
+          break_started_at: string | null
           id: string
+          is_break: boolean
           mode: string
           project_id: string | null
           started_at: string
@@ -26,7 +28,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          break_started_at?: string | null
           id?: string
+          is_break?: boolean
           mode?: string
           project_id?: string | null
           started_at?: string
@@ -36,7 +40,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          break_started_at?: string | null
           id?: string
+          is_break?: boolean
           mode?: string
           project_id?: string | null
           started_at?: string
@@ -79,6 +85,36 @@ export type Database = {
           created_at?: string
           id?: string
           time_in_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      dtr_log: {
+        Row: {
+          created_at: string
+          date: string
+          duration_seconds: number | null
+          id: string
+          time_in: string
+          time_out: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date?: string
+          duration_seconds?: number | null
+          id?: string
+          time_in: string
+          time_out?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          duration_seconds?: number | null
+          id?: string
+          time_in?: string
+          time_out?: string | null
           user_id?: string
         }
         Relationships: []
@@ -152,6 +188,48 @@ export type Database = {
         }
         Relationships: []
       }
+      task_notes: {
+        Row: {
+          created_at: string
+          entry_id: string | null
+          id: string
+          note: string
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entry_id?: string | null
+          id?: string
+          note: string
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entry_id?: string | null
+          id?: string
+          note?: string
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_notes_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "time_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_notes_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           category: string | null
@@ -160,6 +238,7 @@ export type Database = {
           is_completed: boolean
           name: string
           project_id: string | null
+          scope: string | null
           updated_at: string
           user_id: string
         }
@@ -170,6 +249,7 @@ export type Database = {
           is_completed?: boolean
           name: string
           project_id?: string | null
+          scope?: string | null
           updated_at?: string
           user_id: string
         }
@@ -180,6 +260,7 @@ export type Database = {
           is_completed?: boolean
           name?: string
           project_id?: string | null
+          scope?: string | null
           updated_at?: string
           user_id?: string
         }
