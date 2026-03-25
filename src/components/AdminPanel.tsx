@@ -270,7 +270,7 @@ const AdminPanel = () => {
             <Input placeholder="Task name" value={newTaskName} onChange={e=>setNewTaskName(e.target.value)} className="bg-secondary border-border text-sm" />
             <Input placeholder="Scope (optional)" value={newTaskScope} onChange={e=>setNewTaskScope(e.target.value)} className="bg-secondary border-border text-sm" />
             <div className="grid grid-cols-2 gap-2">
-              <Select value={newTaskCategory} onValueChange={setNewTaskCategory}><SelectTrigger className="bg-secondary border-border text-sm"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+              <CategorySelect value={newTaskCategory} onChange={setNewTaskCategory} categories={Array.from(new Set((allTasks as any[]).map((t:any)=>t.category).filter(Boolean)))} triggerClassName="bg-secondary border-border text-sm" />
               <Select value={newTaskProjectId} onValueChange={setNewTaskProjectId}><SelectTrigger className="bg-secondary border-border text-sm"><SelectValue placeholder="Project" /></SelectTrigger><SelectContent><SelectItem value="none">No Project</SelectItem>{(allProjects as any[]).map((p:any)=><SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select>
             </div>
             <Button size="sm" onClick={()=>createTask.mutate()} disabled={!newTaskName.trim()} className="gradient-primary text-sm"><Plus className="h-3 w-3 mr-1" /> Add Task</Button>
