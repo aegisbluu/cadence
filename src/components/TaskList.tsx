@@ -87,16 +87,12 @@ const TaskList = ({ selectedProjectId, selectedTaskId, onSelectTask }: {
             onChange={(e) => setNewName(e.target.value)}
             className="bg-secondary border-border text-sm"
           />
-          <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="bg-secondary border-border text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <CategorySelect
+            value={category}
+            onChange={setCategory}
+            categories={Array.from(new Set(tasks.map(t => t.category).filter(Boolean) as string[]))}
+            triggerClassName="bg-secondary border-border text-sm"
+          />
           <Button size="sm" onClick={() => createMutation.mutate()} disabled={!newName.trim()} className="w-full gradient-primary text-sm">
             Add Task
           </Button>
