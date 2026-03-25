@@ -269,8 +269,8 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
       {/* Task dropdown — only in work mode */}
       {!isBreak && (
         <div className="relative" ref={dropRef}>
-          <button onClick={()=>setTaskOpen(v=>!v)} disabled={isRunning}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${activeTask?"border-primary/50 bg-accent/30":"border-border bg-secondary text-muted-foreground"} ${isRunning?"opacity-60 cursor-not-allowed":"hover:bg-secondary/80 cursor-pointer"}`}>
+          <button onClick={()=>setTaskOpen(v=>!v)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${activeTask?"border-primary/50 bg-accent/30":"border-border bg-secondary text-muted-foreground"} hover:bg-secondary/80 cursor-pointer`}>
             <div className="flex items-center gap-2 min-w-0">
               {activeTask
                 ? <><CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" /><span className="truncate font-medium text-foreground">{activeTask.name}</span><span className="text-xs text-muted-foreground ml-1">· {activeTask.category}</span></>
