@@ -26,9 +26,13 @@ const Members = () => {
   const { data: teammates = [] } = useQuery({
     queryKey: ["teammates", myProfile?.department],
     queryFn: async () => {
-      let q = supabase.from("profiles").select("*").order("display_name");
-      if (myProfile?.department) q = q.eq("department", myProfile.department);
-      const { data } = await q; return data || [];
+      if (!myProfile?.department) {
+        // No department set — only show self
+        const { data } = await supabase.from("profiles").select("*").eq("user_id", user!.id);
+        return data || [];
+      }
+      const { data } = await supabase.from("profiles").select("*").eq("department", myProfile.department).order("display_name");
+      return data || [];
     },
     enabled: !!user && myProfile !== undefined,
     refetchInterval: 10000,
@@ -117,11 +121,19 @@ const Members = () => {
                   <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}{isMe && <span className="text-xs text-muted-foreground ml-1">(you)</span>}</p>
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{p.job_title||"—"}</p>
-                {timer && <p className="text-xs text-muted-foreground truncate">{timer.tasks?.name || "Working"}</p>}
+                {timer && status === "break" && (
+                  <p className="text-xs text-warning font-medium">☕ On Break</p>
+                )}
+                {timer && status === "active" && (
+                  <p className="text-xs text-muted-foreground truncate">🔧 {timer.tasks?.name || "Working"}</p>
+                )}
+                {timer && status === "break" && timer.tasks?.name && (
+                  <p className="text-xs text-muted-foreground truncate">Task: {timer.tasks.name}</p>
+                )}
               </div>
               <div className="text-right flex-shrink-0 space-y-0.5">
                 <p className={`text-xs font-medium ${sl.color}`}>{sl.text}</p>
-                {timer && status === "active" && <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>}
+                {timer && <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>}
                 {att && <p className="text-xs text-muted-foreground">In: {new Date(att.time_in_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
               </div>
             </div>
