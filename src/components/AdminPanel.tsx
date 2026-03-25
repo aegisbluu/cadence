@@ -9,9 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Settings, Folder, ListTodo, Users, Trash2, Pencil, Plus, Camera, Activity, Clock, CheckCircle2, Building2, Save, X, Shield, FileText } from "lucide-react";
 import { format } from "date-fns";
+import CategorySelect from "@/components/CategorySelect";
 
 const PROJECT_COLORS = ["#A855F7","#3B82F6","#10B981","#F97316","#EF4444","#EC4899","#06B6D4","#F59E0B"];
-const CATEGORIES = ["Development","Design","Research","Meeting","Admin","Other"];
 const ROLES = ["admin","user"];
 
 const fmtT = (s:number) => `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
@@ -270,7 +270,7 @@ const AdminPanel = () => {
             <Input placeholder="Task name" value={newTaskName} onChange={e=>setNewTaskName(e.target.value)} className="bg-secondary border-border text-sm" />
             <Input placeholder="Scope (optional)" value={newTaskScope} onChange={e=>setNewTaskScope(e.target.value)} className="bg-secondary border-border text-sm" />
             <div className="grid grid-cols-2 gap-2">
-              <Select value={newTaskCategory} onValueChange={setNewTaskCategory}><SelectTrigger className="bg-secondary border-border text-sm"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+              <CategorySelect value={newTaskCategory} onChange={setNewTaskCategory} categories={Array.from(new Set((allTasks as any[]).map((t:any)=>t.category).filter(Boolean)))} triggerClassName="bg-secondary border-border text-sm" />
               <Select value={newTaskProjectId} onValueChange={setNewTaskProjectId}><SelectTrigger className="bg-secondary border-border text-sm"><SelectValue placeholder="Project" /></SelectTrigger><SelectContent><SelectItem value="none">No Project</SelectItem>{(allProjects as any[]).map((p:any)=><SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select>
             </div>
             <Button size="sm" onClick={()=>createTask.mutate()} disabled={!newTaskName.trim()} className="gradient-primary text-sm"><Plus className="h-3 w-3 mr-1" /> Add Task</Button>
@@ -284,7 +284,7 @@ const AdminPanel = () => {
                     <Input value={editTaskName} onChange={e=>setEditTaskName(e.target.value)} className="bg-card border-border text-sm h-8" placeholder="Task name" />
                     <Input value={editTaskScope} onChange={e=>setEditTaskScope(e.target.value)} className="bg-card border-border text-sm h-8" placeholder="Scope" />
                     <div className="grid grid-cols-2 gap-2">
-                      <Select value={editTaskCategory} onValueChange={setEditTaskCategory}><SelectTrigger className="bg-card border-border text-xs h-7"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+                      <CategorySelect value={editTaskCategory} onChange={setEditTaskCategory} categories={Array.from(new Set((allTasks as any[]).map((t:any)=>t.category).filter(Boolean)))} triggerClassName="bg-card border-border text-xs h-7" />
                       <Select value={editTaskProject} onValueChange={setEditTaskProject}><SelectTrigger className="bg-card border-border text-xs h-7"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No Project</SelectItem>{(allProjects as any[]).map((p:any)=><SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select>
                     </div>
                     <div className="flex gap-1"><Button size="sm" className="h-6 text-xs gradient-primary px-2" onClick={()=>updateTask.mutate({id:t.id,name:editTaskName,category:editTaskCategory,projectId:editTaskProject,scope:editTaskScope})}><Save className="h-3 w-3 mr-1" />Save</Button><Button size="sm" variant="ghost" className="h-6 px-2" onClick={()=>setEditingTaskId(null)}><X className="h-3 w-3" /></Button></div>
