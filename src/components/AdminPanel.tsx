@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Settings, Folder, ListTodo, Users, Trash2, Pencil, Plus, Camera, Activity, Clock, CheckCircle2, Building2, Save, X, Shield, FileText } from "lucide-react";
 import { format } from "date-fns";
+import CategorySelect from "@/components/CategorySelect";
 
 const PROJECT_COLORS = ["#A855F7","#3B82F6","#10B981","#F97316","#EF4444","#EC4899","#06B6D4","#F59E0B"];
-const CATEGORIES = ["Development","Design","Research","Meeting","Admin","Other"];
+const ROLES = ["admin","user"];
 const ROLES = ["admin","user"];
 
 const fmtT = (s:number) => `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
