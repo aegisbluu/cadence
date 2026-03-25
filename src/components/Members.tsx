@@ -117,11 +117,19 @@ const Members = () => {
                   <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}{isMe && <span className="text-xs text-muted-foreground ml-1">(you)</span>}</p>
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{p.job_title||"—"}</p>
-                {timer && <p className="text-xs text-muted-foreground truncate">{timer.tasks?.name || "Working"}</p>}
+                {timer && status === "break" && (
+                  <p className="text-xs text-warning font-medium">☕ On Break</p>
+                )}
+                {timer && status === "active" && (
+                  <p className="text-xs text-muted-foreground truncate">🔧 {timer.tasks?.name || "Working"}</p>
+                )}
+                {timer && status === "break" && timer.tasks?.name && (
+                  <p className="text-xs text-muted-foreground truncate">Task: {timer.tasks.name}</p>
+                )}
               </div>
               <div className="text-right flex-shrink-0 space-y-0.5">
                 <p className={`text-xs font-medium ${sl.color}`}>{sl.text}</p>
-                {timer && status === "active" && <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>}
+                {timer && <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>}
                 {att && <p className="text-xs text-muted-foreground">In: {new Date(att.time_in_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
               </div>
             </div>
