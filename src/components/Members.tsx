@@ -26,9 +26,13 @@ const Members = () => {
   const { data: teammates = [] } = useQuery({
     queryKey: ["teammates", myProfile?.department],
     queryFn: async () => {
-      let q = supabase.from("profiles").select("*").order("display_name");
-      if (myProfile?.department) q = q.eq("department", myProfile.department);
-      const { data } = await q; return data || [];
+      if (!myProfile?.department) {
+        // No department set — only show self
+        const { data } = await supabase.from("profiles").select("*").eq("user_id", user!.id);
+        return data || [];
+      }
+      const { data } = await supabase.from("profiles").select("*").eq("department", myProfile.department).order("display_name");
+      return data || [];
     },
     enabled: !!user && myProfile !== undefined,
     refetchInterval: 10000,
