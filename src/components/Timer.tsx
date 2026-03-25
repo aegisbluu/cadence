@@ -281,11 +281,11 @@ const Timer = ({ projectId, onEntryCreated }: TimerProps) => {
           {taskOpen && (
             <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
               <div className="max-h-56 overflow-y-auto">
-                <button onClick={()=>{ setActiveTaskId(undefined); setTaskOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId?"bg-accent/30 text-primary":"text-muted-foreground"}`}>
+                <button onClick={()=>{ setActiveTaskId(undefined); setTaskOpen(false); if (isRunning && user) supabase.from("active_timers").update({ task_id:null }).eq("user_id",user.id); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId?"bg-accent/30 text-primary":"text-muted-foreground"}`}>
                   <Circle className="h-3.5 w-3.5" /> None
                 </button>
                 {tasks.map((t:any) => (
-                  <button key={t.id} onClick={()=>{ setActiveTaskId(t.id); setTaskOpen(false); }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId===t.id?"bg-accent/30 text-primary":"text-foreground"}`}>
+                  <button key={t.id} onClick={()=>{ setActiveTaskId(t.id); setTaskOpen(false); if (isRunning && user) supabase.from("active_timers").update({ task_id:t.id }).eq("user_id",user.id); }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId===t.id?"bg-accent/30 text-primary":"text-foreground"}`}>
                     <div className="flex items-center gap-2 min-w-0">
                       <CheckCircle2 className={`h-3.5 w-3.5 flex-shrink-0 ${activeTaskId===t.id?"text-primary":"text-muted-foreground"}`} />
                       <span className="truncate">{t.name}</span>
