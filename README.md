@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Welcome to Cadence project
 
-TODO: Document your project here
+Anywhere, Everywhere.
