@@ -5,10 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, CheckCircle2, Circle, Trash2, ListTodo } from "lucide-react";
-
-const CATEGORIES = ["Development", "Design", "Research", "Meeting", "Admin", "Other"];
+import CategorySelect from "@/components/CategorySelect";
 
 const TaskList = ({ selectedProjectId, selectedTaskId, onSelectTask }: {
   selectedProjectId?: string;
