@@ -13,7 +13,6 @@ import CategorySelect from "@/components/CategorySelect";
 
 const PROJECT_COLORS = ["#A855F7","#3B82F6","#10B981","#F97316","#EF4444","#EC4899","#06B6D4","#F59E0B"];
 const ROLES = ["admin","user"];
-const ROLES = ["admin","user"];
 
 const fmtT = (s:number) => `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 const fmtHM = (s:number) => { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?`${h}h ${m}m`:`${m}m`; };
