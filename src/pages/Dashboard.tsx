@@ -7,15 +7,16 @@ import Timer from "@/components/Timer";
 import ProjectList from "@/components/ProjectList";
 import Reports from "@/components/Reports";
 import AdminPanel from "@/components/AdminPanel";
+import Members from "@/components/Members";
 import { Button } from "@/components/ui/button";
-import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown, Home } from "lucide-react";
+import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown, Home, Users } from "lucide-react";
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();
   const { isAdmin } = useRole();
   const queryClient = useQueryClient();
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
-  const [view, setView] = useState<"timer" | "reports" | "admin">("timer");
+  const [view, setView] = useState<"timer" | "reports" | "admin" | "members">("timer");
   const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("cadence-theme") as any) || "dark");
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -36,7 +37,6 @@ const Dashboard = () => {
 
   const displayName = profile?.display_name || user?.email || "";
 
-  // Left sidebar nav — shown on all non-admin views
   const SidebarNav = () => (
     <div className="glass-card p-3 space-y-1">
       <button onClick={() => setView("timer")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "timer" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
@@ -44,6 +44,9 @@ const Dashboard = () => {
       </button>
       <button onClick={() => setView("reports")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
         <BarChart3 className="h-4 w-4" /> Reports
+      </button>
+      <button onClick={() => setView("members")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "members" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+        <Users className="h-4 w-4" /> Members
       </button>
       {isAdmin && (
         <button onClick={() => setView("admin")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
@@ -55,27 +58,18 @@ const Dashboard = () => {
 
   return (
     <div className={`min-h-screen bg-background ${theme === "light" ? "light-mode" : ""}`}>
-      {/* Header — no Track/Reports/Admin nav here anymore */}
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold text-foreground">Cadence</span>
           </div>
-
-          {/* User menu */}
           <div className="relative flex items-center gap-2">
-            <button
-              onClick={() => { setShowUserMenu(!showUserMenu); setShowSettings(false); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-secondary transition-colors"
-            >
-              <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
+            <button onClick={() => { setShowUserMenu(!showUserMenu); setShowSettings(false); }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-secondary transition-colors">
+              <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">{displayName.charAt(0).toUpperCase()}</div>
               <span className="text-sm text-foreground hidden sm:block max-w-[120px] truncate">{displayName}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
-
             {showUserMenu && (
               <div className="absolute right-0 top-10 w-48 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden">
                 <div className="px-3 py-2 border-b border-border">
@@ -83,19 +77,14 @@ const Dashboard = () => {
                   <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
                   {profile?.job_title && <p className="text-xs text-muted-foreground">{profile.job_title}{profile.department ? ` · ${profile.department}` : ""}</p>}
                 </div>
-                <button onClick={() => { setShowSettings(true); setShowUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors">
-                  <Settings className="h-4 w-4" /> Settings
-                </button>
-                <button onClick={signOut} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-secondary transition-colors">
-                  <LogOut className="h-4 w-4" /> Sign out
-                </button>
+                <button onClick={() => { setShowSettings(true); setShowUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-secondary"><Settings className="h-4 w-4" /> Settings</button>
+                <button onClick={signOut} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-secondary"><LogOut className="h-4 w-4" /> Sign out</button>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Settings modal */}
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-5">
@@ -115,17 +104,11 @@ const Dashboard = () => {
             <div>
               <p className="text-sm font-medium text-foreground mb-2">Appearance</p>
               <div className="flex gap-2">
-                <button onClick={() => setTheme("dark")} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm transition-all ${theme === "dark" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}>
-                  <Moon className="h-4 w-4" /> Dark
-                </button>
-                <button onClick={() => setTheme("light")} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm transition-all ${theme === "light" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}>
-                  <Sun className="h-4 w-4" /> Light
-                </button>
+                <button onClick={() => setTheme("dark")} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm transition-all ${theme === "dark" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}><Moon className="h-4 w-4" /> Dark</button>
+                <button onClick={() => setTheme("light")} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm transition-all ${theme === "light" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}><Sun className="h-4 w-4" /> Light</button>
               </div>
             </div>
-            <Button variant="ghost" className="w-full text-destructive hover:text-destructive" onClick={signOut}>
-              <LogOut className="h-4 w-4 mr-2" /> Sign out
-            </Button>
+            <Button variant="ghost" className="w-full text-destructive hover:text-destructive" onClick={signOut}><LogOut className="h-4 w-4 mr-2" /> Sign out</Button>
           </div>
         </div>
       )}
@@ -134,38 +117,23 @@ const Dashboard = () => {
 
       <main className="container mx-auto px-4 py-6">
         {view === "admin" ? (
-          /* Admin full-width with Home button at top */
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => setView("timer")} className="gap-2">
-                <Home className="h-4 w-4" /> Home
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => setView("timer")} className="gap-2"><Home className="h-4 w-4" /> Home</Button>
               <span className="text-sm text-muted-foreground">Admin Dashboard</span>
             </div>
             <AdminPanel />
           </div>
-        ) : view === "reports" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-1 space-y-4">
-              <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
-              <SidebarNav />
-            </div>
-            <div className="lg:col-span-3">
-              <Reports projectId={selectedProjectId} />
-            </div>
-          </div>
         ) : (
-          /* Track view */
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <div className="lg:col-span-1 space-y-4">
               <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
               <SidebarNav />
             </div>
             <div className="lg:col-span-3">
-              <Timer
-                projectId={selectedProjectId}
-                onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })}
-              />
+              {view === "timer" && <Timer projectId={selectedProjectId} onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })} />}
+              {view === "reports" && <Reports projectId={selectedProjectId} />}
+              {view === "members" && <Members />}
             </div>
           </div>
         )}
