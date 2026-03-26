@@ -169,9 +169,12 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, [isRunning]);
 
-  // Screenshot — save to DB instead of storage
+  // Screenshot — save to DB instead of storage (uses refs to avoid interval reset)
   const takeScreenshot = useCallback(async () => {
     try {
+      const curElapsed = elapsedRef.current;
+      const curTaskId = activeTaskIdRef.current;
+      const curScope = taskScopeRef.current;
       const canvas = document.createElement("canvas");
       const w = Math.min(window.innerWidth, 1280);
       const h = Math.min(window.innerHeight, 800);
@@ -179,21 +182,19 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
       canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        // Try to capture from visible document via html2canvas-style approach
         ctx.fillStyle = "#1a1a2e";
         ctx.fillRect(0, 0, w, h);
         ctx.fillStyle = "#ffffff";
         ctx.font = "16px monospace";
         const ts = new Date().toLocaleTimeString();
         ctx.fillText(`Cadence Clock · ${ts}`, 20, 30);
-        ctx.fillText(`Timer: ${fmt(elapsed)}`, 20, 55);
+        ctx.fillText(`Timer: ${fmt(curElapsed)}`, 20, 55);
         ctx.fillText(`Mode: ${mode}`, 20, 80);
-        if (activeTaskId) {
-          const task = (tasks as any[]).find(t => t.id === activeTaskId);
+        if (curTaskId) {
+          const task = (tasks as any[]).find(t => t.id === curTaskId);
           if (task) ctx.fillText(`Task: ${task.name}`, 20, 105);
         }
-        if (taskScope) ctx.fillText(`Scope: ${taskScope}`, 20, 130);
-        // Draw a border
+        if (curScope) ctx.fillText(`Scope: ${curScope}`, 20, 130);
         ctx.strokeStyle = "#A855F7";
         ctx.lineWidth = 2;
         ctx.strokeRect(10, 10, w - 20, 140);
@@ -202,21 +203,18 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
       const { error } = await supabase.from("screenshots").insert({
         user_id: user!.id,
         image_data: imageData,
-        timer_elapsed: elapsed,
-        task_id: activeTaskId || null,
+        timer_elapsed: curElapsed,
+        task_id: curTaskId || null,
       });
       if (error) {
         console.error("Screenshot save error:", error);
-        toast({ title: "Screenshot failed", description: error.message, variant: "destructive" });
       } else {
-        console.log("Screenshot captured successfully");
-        toast({ title: "Screenshot captured", description: `Next in ${ssInterval / 60} min` });
+        console.log("Screenshot captured at", new Date().toLocaleTimeString());
       }
     } catch (err) {
       console.error("Screenshot error:", err);
-      toast({ title: "Screenshot failed", variant: "destructive" });
     }
-  }, [elapsed, ssInterval, activeTaskId, tasks, toast, user, mode, taskScope]);
+  }, [mode, tasks, user]);
 
   useEffect(() => {
     if (isRunning && mode === "work" && ssInterval > 0) {
