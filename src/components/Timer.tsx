@@ -231,6 +231,10 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
       mode, is_break: mode === "break",
       break_started_at: mode === "break" ? new Date().toISOString() : null,
     }, { onConflict: "user_id" });
+    // Take initial screenshot after short delay
+    if (mode === "work" && ssInterval > 0) {
+      setTimeout(() => takeScreenshot(), 2000);
+    }
   };
 
   const handleStop = async () => {
