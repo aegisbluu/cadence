@@ -358,10 +358,10 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
         <div className="space-y-2">
           <div className="relative" ref={dropRef}>
             <button
-              onClick={() => setTaskOpen(v => !v)} disabled={isRunning}
+              onClick={() => setTaskOpen(v => !v)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors
                 ${activeTask ? "border-primary/50 bg-accent/30" : "border-border bg-secondary text-muted-foreground"}
-                ${isRunning ? "opacity-60 cursor-not-allowed" : "hover:bg-secondary/80 cursor-pointer"}`}
+                hover:bg-secondary/80 cursor-pointer`}
             >
               <div className="flex items-center gap-2 min-w-0">
                 {activeTask
@@ -372,14 +372,14 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               <ChevronDown className={`h-4 w-4 ml-2 flex-shrink-0 transition-transform ${taskOpen ? "rotate-180" : ""}`} />
             </button>
 
-            {taskOpen && !isRunning && (
+            {taskOpen && (
               <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
                 <div className="max-h-56 overflow-y-auto">
-                  <button onClick={() => { setActiveTaskId(undefined); setTaskOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}>
+                  <button onClick={async () => { setActiveTaskId(undefined); activeTaskIdRef.current = undefined; setTaskOpen(false); if (isRunning && user) { await supabase.from("active_timers").update({ task_id: null }).eq("user_id", user.id); } }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}>
                     <Circle className="h-3.5 w-3.5" /> None
                   </button>
                   {(tasks as any[]).map((t: any) => (
-                    <button key={t.id} onClick={() => { setActiveTaskId(t.id); setTaskOpen(false); }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId === t.id ? "bg-accent/30 text-primary" : "text-foreground"}`}>
+                    <button key={t.id} onClick={async () => { setActiveTaskId(t.id); activeTaskIdRef.current = t.id; setTaskOpen(false); if (isRunning && user) { await supabase.from("active_timers").update({ task_id: t.id }).eq("user_id", user.id); } }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId === t.id ? "bg-accent/30 text-primary" : "text-foreground"}`}>
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className={`h-3.5 w-3.5 flex-shrink-0 ${activeTaskId === t.id ? "text-primary" : "text-muted-foreground"}`} />
                         <span className="truncate">{t.name}</span>
@@ -401,8 +401,7 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               placeholder="Scope / notes for this session (optional)"
               value={taskScope}
               onChange={e => setTaskScope(e.target.value)}
-              disabled={isRunning}
-              className={`bg-secondary border-border text-sm h-8 ${isRunning ? "opacity-60" : ""}`}
+              className="bg-secondary border-border text-sm h-8"
             />
           )}
         </div>
