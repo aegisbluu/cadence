@@ -188,6 +188,41 @@ export type Database = {
         }
         Relationships: []
       }
+      screenshots: {
+        Row: {
+          id: string
+          image_data: string
+          taken_at: string
+          task_id: string | null
+          timer_elapsed: number | null
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          image_data: string
+          taken_at?: string
+          task_id?: string | null
+          timer_elapsed?: number | null
+          user_id: string
+        }
+        Update: {
+          id?: string
+          image_data?: string
+          taken_at?: string
+          task_id?: string | null
+          timer_elapsed?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "screenshots_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_notes: {
         Row: {
           created_at: string
