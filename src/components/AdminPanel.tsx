@@ -36,7 +36,7 @@ const AdminPanel = () => {
   const [now, setNow] = useState(Date.now());
   const [dtrDate, setDtrDate] = useState(new Date().toISOString().split("T")[0]);
   const [expandedSs, setExpandedSs] = useState<string|null>(null);
-  const [ssUserFilter, setSsUserFilter] = useState("");
+  const [ssUserFilter, setSsUserFilter] = useState("all");
 
   useEffect(() => { const t=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(t); },[]);
 
@@ -71,7 +71,7 @@ const AdminPanel = () => {
     queryFn:async()=>{
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
       let q = supabase.from("screenshots").select("id, user_id, taken_at, timer_elapsed, task_id, tasks(name)").gte("taken_at", threeDaysAgo).order("taken_at", { ascending: false });
-      if (ssUserFilter) q = q.eq("user_id", ssUserFilter);
+      if (ssUserFilter !== "all") q = q.eq("user_id", ssUserFilter);
       const { data } = await q;
       const profileMap: Record<string,string> = {};
       for (const p of allProfiles as any[]) profileMap[p.user_id] = p.display_name || "Unknown";
@@ -114,7 +114,7 @@ const AdminPanel = () => {
   const updateTask = useMutation({ mutationFn:async({id,name,category}:{id:string;name:string;category:string})=>{ const {error}=await supabase.from("tasks").update({name,category}).eq("id",id); if(error) throw error; }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_tasks"]}); qc.invalidateQueries({queryKey:["tasks_all"]}); setEditingTaskId(null); toast({title:"Task updated"}); } });
   const deleteTask = useMutation({ mutationFn:async(id:string)=>{ const {error}=await supabase.from("tasks").delete().eq("id",id); if(error) throw error; }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_tasks"]}); qc.invalidateQueries({queryKey:["tasks_all"]}); toast({title:"Deleted"}); } });
   const updateMemberProfile = useMutation({ mutationFn:async({userId,name,jobTitle,department}:{userId:string;name:string;jobTitle:string;department:string})=>{ const {error}=await supabase.from("profiles").update({display_name:name,job_title:jobTitle,department}).eq("user_id",userId); if(error) throw error; }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_profiles"]}); setEditingDeptUserId(null); toast({title:"Profile updated"}); }, onError:(e:any)=>toast({title:"Error",description:e.message,variant:"destructive"}) });
-  const updateUserRole = useMutation({ mutationFn:async({userId,role}:{userId:string;role:string})=>{ const typedRole = role as "admin"|"user"; await supabase.from("user_roles").upsert({user_id:userId,role:typedRole},{onConflict:"user_id,role"}); await supabase.from("user_roles").delete().eq("user_id",userId).neq("role",typedRole); }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_roles"]}); setEditingRoleId(null); toast({title:"Role updated"}); } });
+  const updateUserRole = useMutation({ mutationFn:async({userId,role}:{userId:string;role:string})=>{ await supabase.from("user_roles").upsert({user_id:userId,role:role as any},{onConflict:"user_id,role"}); await supabase.from("user_roles").delete().eq("user_id",userId).neq("role",role); }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_roles"]}); setEditingRoleId(null); toast({title:"Role updated"}); } });
   const updateScreenshot = useMutation({ mutationFn:async({userId,interval}:{userId:string;interval:number})=>{ const {error}=await supabase.from("profiles").update({screenshot_interval:interval}).eq("user_id",userId); if(error) throw error; }, onSuccess:()=>{ qc.invalidateQueries({queryKey:["admin_profiles"]}); toast({title:"Saved!"}); }, onError:(e:any)=>toast({title:"Error",description:e.message,variant:"destructive"}) });
 
   return (
@@ -230,8 +230,8 @@ const AdminPanel = () => {
                     <tr key={d.id} className="border-b border-border/50 hover:bg-secondary/30">
                       <td className="py-2 px-3 text-foreground font-medium">{d.display_name}</td>
                       <td className="py-2 px-3 text-muted-foreground">{d.time_in ? format(new Date(d.time_in),"h:mm a") : "—"}</td>
-                      <td className="py-2 px-3">{d.time_out ? <span className="text-muted-foreground">{format(new Date(d.time_out),"h:mm a")}</span> : <span className="text-muted-foreground text-xs">—</span>}</td>
-                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : "—"}</td>
+                      <td className="py-2 px-3">{d.time_out ? <span className="text-muted-foreground">{format(new Date(d.time_out),"h:mm a")}</span> : <span className="text-green-500 text-xs">Active</span>}</td>
+                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : d.time_out ? "—" : <span className="text-xs text-muted-foreground">ongoing</span>}</td>
                     </tr>
                   ))}
                   {(dtrLogs as any[]).length===0&&<tr><td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">No records for {dtrDate}</td></tr>}
@@ -264,7 +264,7 @@ const AdminPanel = () => {
           <div className="glass-card p-4 space-y-3">
             <h3 className="text-sm font-semibold text-foreground">Add Task</h3>
             <Input placeholder="Task name" value={newTaskName} onChange={e=>setNewTaskName(e.target.value)} className="bg-secondary border-border text-sm" />
-            <Select value={newTaskCategory} onValueChange={setNewTaskCategory}><SelectTrigger className="bg-secondary border-border text-sm"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+            <Input placeholder="Category (e.g. Development, Design, Meeting…)" value={newTaskCategory} onChange={e=>setNewTaskCategory(e.target.value)} className="bg-secondary border-border text-sm" />
             <Button size="sm" onClick={()=>createTask.mutate()} disabled={!newTaskName.trim()} className="gradient-primary text-sm"><Plus className="h-3 w-3 mr-1" /> Add Task</Button>
           </div>
           <div className="glass-card p-4 space-y-2">
@@ -274,7 +274,7 @@ const AdminPanel = () => {
                 {editingTaskId===t.id?(
                   <div className="space-y-2">
                     <Input value={editTaskName} onChange={e=>setEditTaskName(e.target.value)} className="bg-card border-border text-sm h-8" placeholder="Task name" />
-                    <Select value={editTaskCategory} onValueChange={setEditTaskCategory}><SelectTrigger className="bg-card border-border text-xs h-7"><SelectValue /></SelectTrigger><SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+                    <Input value={editTaskCategory} onChange={e=>setEditTaskCategory(e.target.value)} className="bg-card border-border text-xs h-7" placeholder="Category (e.g. Development, Design…)" />
                     <div className="flex gap-1"><Button size="sm" className="h-6 text-xs gradient-primary px-2" onClick={()=>updateTask.mutate({id:t.id,name:editTaskName,category:editTaskCategory})}><Save className="h-3 w-3 mr-1" />Save</Button><Button size="sm" variant="ghost" className="h-6 px-2" onClick={()=>setEditingTaskId(null)}><X className="h-3 w-3" /></Button></div>
                   </div>
                 ):(
@@ -297,8 +297,9 @@ const AdminPanel = () => {
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Camera className="h-4 w-4 text-primary" /> Screenshots (last 3 days)</h3>
               <div className="flex gap-2 items-center">
                 <Select value={ssUserFilter} onValueChange={setSsUserFilter}>
-                  <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="Filter by user" /></SelectTrigger>
+                  <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="All users" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="all">All users</SelectItem>
                     {(allProfiles as any[]).map((p:any)=><SelectItem key={p.user_id} value={p.user_id}>{p.display_name||"Unnamed"}</SelectItem>)}
                   </SelectContent>
                 </Select>
