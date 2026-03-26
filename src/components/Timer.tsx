@@ -40,6 +40,9 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
   const timeInRef = useRef<NodeJS.Timeout|null>(null);
   const ssRef = useRef<NodeJS.Timeout|null>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  const elapsedRef = useRef(0);
+  const activeTaskIdRef = useRef(activeTaskId);
+  const taskScopeRef = useRef(taskScope);
 
   // ── Restore clock from DB ──
   const { data: activeTimer, refetch: refetchTimer } = useQuery({
