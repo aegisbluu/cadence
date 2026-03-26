@@ -40,6 +40,9 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
   const timeInRef = useRef<NodeJS.Timeout|null>(null);
   const ssRef = useRef<NodeJS.Timeout|null>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  const elapsedRef = useRef(0);
+  const activeTaskIdRef = useRef(activeTaskId);
+  const taskScopeRef = useRef(taskScope);
 
   // ── Restore clock from DB ──
   const { data: activeTimer, refetch: refetchTimer } = useQuery({
@@ -154,6 +157,11 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
     document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
   }, []);
 
+  // Sync refs
+  useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
+  useEffect(() => { activeTaskIdRef.current = activeTaskId; }, [activeTaskId]);
+  useEffect(() => { taskScopeRef.current = taskScope; }, [taskScope]);
+
   // Work tick
   useEffect(() => {
     if (isRunning) { tickRef.current = setInterval(() => setElapsed(e => e + 1), 1000); }
@@ -161,36 +169,52 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, [isRunning]);
 
-  // Screenshot — save to DB instead of storage
+  // Screenshot — save to DB instead of storage (uses refs to avoid interval reset)
   const takeScreenshot = useCallback(async () => {
     try {
+      const curElapsed = elapsedRef.current;
+      const curTaskId = activeTaskIdRef.current;
+      const curScope = taskScopeRef.current;
       const canvas = document.createElement("canvas");
-      canvas.width = Math.min(window.innerWidth, 1280);
-      canvas.height = Math.min(window.innerHeight, 800);
+      const w = Math.min(window.innerWidth, 1280);
+      const h = Math.min(window.innerHeight, 800);
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.fillStyle = "#1a1a2e";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, w, h);
         ctx.fillStyle = "#ffffff";
-        ctx.font = "20px Inter";
-        ctx.fillText(`Screenshot at ${new Date().toLocaleTimeString()}`, 20, 40);
-        ctx.fillText(`Timer: ${fmt(elapsed)}`, 20, 70);
-        if (activeTaskId) {
-          const task = (tasks as any[]).find(t => t.id === activeTaskId);
-          if (task) ctx.fillText(`Task: ${task.name}`, 20, 100);
+        ctx.font = "16px monospace";
+        const ts = new Date().toLocaleTimeString();
+        ctx.fillText(`Cadence Clock · ${ts}`, 20, 30);
+        ctx.fillText(`Timer: ${fmt(curElapsed)}`, 20, 55);
+        ctx.fillText(`Mode: ${mode}`, 20, 80);
+        if (curTaskId) {
+          const task = (tasks as any[]).find(t => t.id === curTaskId);
+          if (task) ctx.fillText(`Task: ${task.name}`, 20, 105);
         }
+        if (curScope) ctx.fillText(`Scope: ${curScope}`, 20, 130);
+        ctx.strokeStyle = "#A855F7";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, 10, w - 20, 140);
       }
       const imageData = canvas.toDataURL("image/png");
-      // Save to screenshots table in DB (3-day auto-cleanup handled by admin)
-      await supabase.from("screenshots").insert({
+      const { error } = await supabase.from("screenshots").insert({
         user_id: user!.id,
         image_data: imageData,
-        timer_elapsed: elapsed,
-        task_id: activeTaskId || null,
+        timer_elapsed: curElapsed,
+        task_id: curTaskId || null,
       });
-      toast({ title: "Screenshot captured", description: `Next in ${ssInterval / 60} min` });
-    } catch { toast({ title: "Screenshot failed", variant: "destructive" }); }
-  }, [elapsed, ssInterval, activeTaskId, tasks, toast, user]);
+      if (error) {
+        console.error("Screenshot save error:", error);
+      } else {
+        console.log("Screenshot captured at", new Date().toLocaleTimeString());
+      }
+    } catch (err) {
+      console.error("Screenshot error:", err);
+    }
+  }, [mode, tasks, user]);
 
   useEffect(() => {
     if (isRunning && mode === "work" && ssInterval > 0) {
@@ -207,6 +231,10 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
       mode, is_break: mode === "break",
       break_started_at: mode === "break" ? new Date().toISOString() : null,
     }, { onConflict: "user_id" });
+    // Take initial screenshot after short delay
+    if (mode === "work" && ssInterval > 0) {
+      setTimeout(() => takeScreenshot(), 2000);
+    }
   };
 
   const handleStop = async () => {
@@ -315,8 +343,8 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
         <div className="space-y-2">
           <div className="relative" ref={dropRef}>
             <button
-              onClick={() => setTaskOpen(v => !v)} disabled={isRunning}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${activeTask ? "border-primary/50 bg-accent/30" : "border-border bg-secondary text-muted-foreground"} ${isRunning ? "opacity-60 cursor-not-allowed" : "hover:bg-secondary/80 cursor-pointer"}`}
+              onClick={() => setTaskOpen(v => !v)}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${activeTask ? "border-primary/50 bg-accent/30" : "border-border bg-secondary text-muted-foreground"} hover:bg-secondary/80 cursor-pointer`}
             >
               <div className="flex items-center gap-2 min-w-0">
                 {activeTask
@@ -325,14 +353,14 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               </div>
               <ChevronDown className={`h-4 w-4 ml-2 flex-shrink-0 transition-transform ${taskOpen ? "rotate-180" : ""}`} />
             </button>
-            {taskOpen && !isRunning && (
+            {taskOpen && (
               <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
                 <div className="max-h-56 overflow-y-auto">
-                  <button onClick={() => { setActiveTaskId(undefined); setTaskOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}>
+                  <button onClick={async () => { setActiveTaskId(undefined); setTaskOpen(false); if (isRunning && user) await supabase.from("active_timers").update({ task_id: null }).eq("user_id", user.id); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}>
                     <Circle className="h-3.5 w-3.5" /> None
                   </button>
                   {(tasks as any[]).map((t: any) => (
-                    <button key={t.id} onClick={() => { setActiveTaskId(t.id); setTaskOpen(false); }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId === t.id ? "bg-accent/30 text-primary" : "text-foreground"}`}>
+                    <button key={t.id} onClick={async () => { setActiveTaskId(t.id); setTaskOpen(false); if (isRunning && user) await supabase.from("active_timers").update({ task_id: t.id }).eq("user_id", user.id); }} className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary ${activeTaskId === t.id ? "bg-accent/30 text-primary" : "text-foreground"}`}>
                       <div className="flex items-center gap-2 min-w-0">
                         <CheckCircle2 className={`h-3.5 w-3.5 flex-shrink-0 ${activeTaskId === t.id ? "text-primary" : "text-muted-foreground"}`} />
                         <span className="truncate">{t.name}</span>
@@ -354,8 +382,7 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               placeholder="Scope / notes for this session (optional)"
               value={taskScope}
               onChange={e => setTaskScope(e.target.value)}
-              disabled={isRunning}
-              className={`bg-secondary border-border text-sm h-8 ${isRunning ? "opacity-60" : ""}`}
+              className="bg-secondary border-border text-sm h-8"
             />
           )}
         </div>
