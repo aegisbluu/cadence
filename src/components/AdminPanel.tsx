@@ -36,7 +36,7 @@ const AdminPanel = () => {
   const [now, setNow] = useState(Date.now());
   const [dtrDate, setDtrDate] = useState(new Date().toISOString().split("T")[0]);
   const [expandedSs, setExpandedSs] = useState<string|null>(null);
-  const [ssUserFilter, setSsUserFilter] = useState("all");
+  const [ssUserFilter, setSsUserFilter] = useState("");
 
   useEffect(() => { const t=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(t); },[]);
 
