@@ -325,7 +325,7 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               </div>
               <ChevronDown className={`h-4 w-4 ml-2 flex-shrink-0 transition-transform ${taskOpen ? "rotate-180" : ""}`} />
             </button>
-            {taskOpen && !isRunning && (
+            {taskOpen && (
               <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
                 <div className="max-h-56 overflow-y-auto">
                   <button onClick={() => { setActiveTaskId(undefined); setTaskOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary ${!activeTaskId ? "bg-accent/30 text-primary" : "text-muted-foreground"}`}>
