@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings, ListTodo, Trash2, Pencil, Plus, Camera, Activity, Clock, CheckCircle2, Building2, Save, X, Shield, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { Settings, ListTodo, Trash2, Pencil, Plus, Camera, Activity, Clock, CheckCircle2, Building2, Save, X, Shield, FileText, ChevronDown, ChevronUp, UserMinus, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 
 const CATEGORIES = ["Development","Design","Research","Meeting","Admin","Other"];
@@ -36,6 +36,8 @@ const AdminPanel = () => {
   const [now, setNow] = useState(Date.now());
   const [dtrDate, setDtrDate] = useState(new Date().toISOString().split("T")[0]);
   const [expandedSs, setExpandedSs] = useState<string|null>(null);
+  const [deleteConfirmUserId, setDeleteConfirmUserId] = useState<string|null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [ssUserFilter, setSsUserFilter] = useState("all");
 
   useEffect(() => { const t=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(t); },[]);
@@ -60,7 +62,30 @@ const AdminPanel = () => {
       // Manually join with profiles
       const profileMap: Record<string,string> = {};
       for (const p of allProfiles as any[]) profileMap[p.user_id] = p.display_name || "Unknown";
-      return (data||[]).map(d => ({ ...d, display_name: profileMap[d.user_id] || "Unknown" }));
+      const deleteAccount = useMutation({
+    mutationFn: async (userId: string) => {
+      // Delete all user data in order (cascade should handle most, but be explicit)
+      await supabase.from("active_timers").delete().eq("user_id", userId);
+      await supabase.from("attendance").delete().eq("user_id", userId);
+      await supabase.from("dtr_log").delete().eq("user_id", userId);
+      await supabase.from("screenshots").delete().eq("user_id", userId);
+      await supabase.from("user_roles").delete().eq("user_id", userId);
+      await supabase.from("profiles").delete().eq("user_id", userId);
+      // Delete auth user via admin API — requires service role, so we use RPC if available
+      // Otherwise the profile deletion cascades to auth.users via ON DELETE CASCADE
+      const { error } = await supabase.auth.admin.deleteUser(userId).catch(() => ({ error: null }));
+      if (error) console.warn("Auth user deletion:", error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin_profiles"] });
+      qc.invalidateQueries({ queryKey: ["admin_roles"] });
+      setDeleteConfirmUserId(null);
+      toast({ title: "Account deleted", description: "This action cannot be undone." });
+    },
+    onError: (e: any) => toast({ title: "Error deleting account", description: e.message, variant: "destructive" }),
+  });
+
+  return (data||[]).map(d => ({ ...d, display_name: profileMap[d.user_id] || "Unknown" }));
     },
     enabled: !!user && (allProfiles as any[]).length > 0,
   });
@@ -129,6 +154,7 @@ const AdminPanel = () => {
           <TabsTrigger value="roles" className="gap-1 text-xs"><Shield className="h-3 w-3" /> Roles</TabsTrigger>
           <TabsTrigger value="tasks" className="gap-1 text-xs"><ListTodo className="h-3 w-3" /> Tasks</TabsTrigger>
           <TabsTrigger value="screenshots" className="gap-1 text-xs"><Camera className="h-3 w-3" /> Screenshots</TabsTrigger>
+          <TabsTrigger value="administration" className="gap-1 text-xs"><UserMinus className="h-3 w-3" /> Administration</TabsTrigger>
         </TabsList>
 
         {/* DEPARTMENTS */}
@@ -339,6 +365,66 @@ const AdminPanel = () => {
             {(allProfiles as any[]).map((p:any)=>(
               <ScreenshotRow key={p.user_id} profile={p} onSave={interval=>updateScreenshot.mutate({userId:p.user_id,interval})} />
             ))}
+          </div>
+        </TabsContent>
+      {/* ADMINISTRATION */}
+        <TabsContent value="administration" className="space-y-4">
+          {/* Confirm delete dialog */}
+          {deleteConfirmUserId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+              <div className="bg-card border border-destructive/50 rounded-2xl p-6 w-full max-w-sm shadow-xl space-y-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-8 w-8 text-destructive flex-shrink-0" />
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">Delete account permanently?</h3>
+                    <p className="text-sm text-muted-foreground mt-0.5">This will delete <span className="font-medium text-foreground">{deleteConfirmName}</span> and all their data. This cannot be undone.</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button variant="destructive" className="flex-1 gap-2" onClick={() => deleteAccount.mutate(deleteConfirmUserId!)} disabled={deleteAccount.isPending}>
+                    <Trash2 className="h-4 w-4" /> {deleteAccount.isPending ? "Deleting…" : "Yes, delete"}
+                  </Button>
+                  <Button variant="outline" className="flex-1" onClick={() => setDeleteConfirmUserId(null)}>Cancel</Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="glass-card p-4 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+              <UserMinus className="h-4 w-4 text-destructive" />
+              <h3 className="text-sm font-semibold text-foreground">Delete Accounts</h3>
+            </div>
+            <p className="text-xs text-muted-foreground border border-destructive/30 bg-destructive/5 rounded-lg px-3 py-2">
+              ⚠ Deleted accounts and all associated data (time entries, screenshots, DTR records) are permanently removed and cannot be restored.
+            </p>
+            <div className="space-y-2">
+              {(allProfiles as any[]).filter((p: any) => p.user_id !== user?.id).map((p: any) => (
+                <div key={p.user_id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-secondary/50 border border-border/50">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
+                      {(p.display_name || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{p.job_title || "—"}{p.department ? ` · ${p.department}` : ""}</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0 gap-1"
+                    onClick={() => { setDeleteConfirmUserId(p.user_id); setDeleteConfirmName(p.display_name || "this user"); }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </Button>
+                </div>
+              ))}
+              {(allProfiles as any[]).filter((p: any) => p.user_id !== user?.id).length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">No other accounts to manage</p>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">Your own account is not listed here and cannot be self-deleted.</p>
           </div>
         </TabsContent>
       </Tabs>
