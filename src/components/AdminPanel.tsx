@@ -71,7 +71,7 @@ const AdminPanel = () => {
     queryFn:async()=>{
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
       let q = supabase.from("screenshots").select("id, user_id, taken_at, timer_elapsed, task_id, tasks(name)").gte("taken_at", threeDaysAgo).order("taken_at", { ascending: false });
-      if (ssUserFilter !== "all") q = q.eq("user_id", ssUserFilter);
+      if (ssUserFilter) q = q.eq("user_id", ssUserFilter);
       const { data } = await q;
       const profileMap: Record<string,string> = {};
       for (const p of allProfiles as any[]) profileMap[p.user_id] = p.display_name || "Unknown";
