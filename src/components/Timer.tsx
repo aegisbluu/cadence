@@ -157,6 +157,11 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
     document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
   }, []);
 
+  // Sync refs
+  useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
+  useEffect(() => { activeTaskIdRef.current = activeTaskId; }, [activeTaskId]);
+  useEffect(() => { taskScopeRef.current = taskScope; }, [taskScope]);
+
   // Work tick
   useEffect(() => {
     if (isRunning) { tickRef.current = setInterval(() => setElapsed(e => e + 1), 1000); }
