@@ -4,7 +4,6 @@ import { useRole } from "@/hooks/useRole";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import Timer from "@/components/Timer";
-import ProjectList from "@/components/ProjectList";
 import Reports from "@/components/Reports";
 import AdminPanel from "@/components/AdminPanel";
 import Members from "@/components/Members";
@@ -15,7 +14,6 @@ const Dashboard = () => {
   const { user, signOut } = useAuth();
   const { isAdmin } = useRole();
   const queryClient = useQueryClient();
-  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
   const [view, setView] = useState<"timer" | "reports" | "admin" | "members">("timer");
   const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("cadence-theme") as any) || "dark");
   const [showSettings, setShowSettings] = useState(false);
@@ -64,7 +62,7 @@ const Dashboard = () => {
             <Clock className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold text-foreground">Cadence</span>
           </div>
-          <div className="relative flex items-center gap-2">
+          <div className="relative">
             <button onClick={() => { setShowUserMenu(!showUserMenu); setShowSettings(false); }} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-secondary transition-colors">
               <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">{displayName.charAt(0).toUpperCase()}</div>
               <span className="text-sm text-foreground hidden sm:block max-w-[120px] truncate">{displayName}</span>
@@ -112,7 +110,6 @@ const Dashboard = () => {
           </div>
         </div>
       )}
-
       {showUserMenu && <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />}
 
       <main className="container mx-auto px-4 py-6">
@@ -126,13 +123,12 @@ const Dashboard = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-1 space-y-4">
-              <ProjectList selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} />
+            <div className="lg:col-span-1">
               <SidebarNav />
             </div>
             <div className="lg:col-span-3">
-              {view === "timer" && <Timer projectId={selectedProjectId} onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })} />}
-              {view === "reports" && <Reports projectId={selectedProjectId} />}
+              {view === "timer" && <Timer onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })} />}
+              {view === "reports" && <Reports />}
               {view === "members" && <Members />}
             </div>
           </div>
