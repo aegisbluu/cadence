@@ -315,7 +315,7 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
         <div className="space-y-2">
           <div className="relative" ref={dropRef}>
             <button
-              onClick={() => setTaskOpen(v => !v)} disabled={isRunning}
+              onClick={() => setTaskOpen(v => !v)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${activeTask ? "border-primary/50 bg-accent/30" : "border-border bg-secondary text-muted-foreground"} hover:bg-secondary/80 cursor-pointer`}
             >
               <div className="flex items-center gap-2 min-w-0">
