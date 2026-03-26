@@ -297,9 +297,8 @@ const AdminPanel = () => {
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><Camera className="h-4 w-4 text-primary" /> Screenshots (last 3 days)</h3>
               <div className="flex gap-2 items-center">
                 <Select value={ssUserFilter} onValueChange={setSsUserFilter}>
-                  <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="All users" /></SelectTrigger>
+                  <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="Filter by user" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All users</SelectItem>
                     {(allProfiles as any[]).map((p:any)=><SelectItem key={p.user_id} value={p.user_id}>{p.display_name||"Unnamed"}</SelectItem>)}
                   </SelectContent>
                 </Select>

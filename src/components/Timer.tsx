@@ -354,8 +354,7 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
               placeholder="Scope / notes for this session (optional)"
               value={taskScope}
               onChange={e => setTaskScope(e.target.value)}
-              disabled={isRunning}
-              className={`bg-secondary border-border text-sm h-8 ${isRunning ? "opacity-60" : ""}`}
+              className="bg-secondary border-border text-sm h-8"
             />
           )}
         </div>
