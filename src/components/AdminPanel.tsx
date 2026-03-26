@@ -230,8 +230,8 @@ const AdminPanel = () => {
                     <tr key={d.id} className="border-b border-border/50 hover:bg-secondary/30">
                       <td className="py-2 px-3 text-foreground font-medium">{d.display_name}</td>
                       <td className="py-2 px-3 text-muted-foreground">{d.time_in ? format(new Date(d.time_in),"h:mm a") : "—"}</td>
-                      <td className="py-2 px-3">{d.time_out ? <span className="text-muted-foreground">{format(new Date(d.time_out),"h:mm a")}</span> : <span className="text-green-500 text-xs">Active</span>}</td>
-                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : d.time_out ? "—" : <span className="text-xs text-muted-foreground">ongoing</span>}</td>
+                      <td className="py-2 px-3">{d.time_out ? <span className="text-muted-foreground">{format(new Date(d.time_out),"h:mm a")}</span> : <span className="text-muted-foreground text-xs">—</span>}</td>
+                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : "—"}</td>
                     </tr>
                   ))}
                   {(dtrLogs as any[]).length===0&&<tr><td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">No records for {dtrDate}</td></tr>}
