@@ -1,83 +1,119 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { Users } from "lucide-react";
 
-const fmt = (s: number) => `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+const fmt = (s: number) =>
+  `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
 const Members = () => {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const [now, setNow] = useState(Date.now());
 
+  // Tick every second for live durations
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Get current user's department
+  // My profile — need department
   const { data: myProfile } = useQuery({
-    queryKey: ["my_profile", user?.id],
-    queryFn: async () => { const { data } = await supabase.from("profiles").select("department").eq("user_id", user!.id).single(); return data; },
+    queryKey: ["my_profile_dept", user?.id],
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("user_id, department, display_name, job_title").eq("user_id", user!.id).single();
+      return data;
+    },
     enabled: !!user,
   });
 
-  // Get all profiles in same department
+  // All teammates in same department
   const { data: teammates = [] } = useQuery({
     queryKey: ["teammates", myProfile?.department],
     queryFn: async () => {
-      if (!myProfile?.department) {
-        // No department set — only show self
-        const { data } = await supabase.from("profiles").select("*").eq("user_id", user!.id);
-        return data || [];
-      }
-      const { data } = await supabase.from("profiles").select("*").eq("department", myProfile.department).order("display_name");
+      let q = supabase.from("profiles").select("user_id, display_name, job_title, department").order("display_name");
+      if (myProfile?.department) q = q.eq("department", myProfile.department);
+      const { data } = await q;
       return data || [];
     },
     enabled: !!user && myProfile !== undefined,
-    refetchInterval: 10000,
+    refetchInterval: 15000,
   });
 
+  // Active timers — all users (RLS allows all authenticated to read)
   const { data: activeTimers = [] } = useQuery({
-    queryKey: ["members_active_timers"],
-    queryFn: async () => { const { data } = await supabase.from("active_timers").select("*, tasks(name)"); return data || []; },
+    queryKey: ["members_timers"],
+    queryFn: async () => {
+      const { data } = await supabase.from("active_timers").select("user_id, started_at, mode, task_id, tasks(name)");
+      return data || [];
+    },
     enabled: !!user,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
   });
 
+  // Attendance — all users (RLS allows all authenticated to read)
   const { data: attendances = [] } = useQuery({
     queryKey: ["members_attendance"],
-    queryFn: async () => { const { data } = await supabase.from("attendance").select("*"); return data || []; },
+    queryFn: async () => {
+      const { data } = await supabase.from("attendance").select("user_id, time_in_at");
+      return data || [];
+    },
     enabled: !!user,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
   });
 
-  const timerMap: Record<string,any> = {};
+  // Subscribe to realtime changes so status updates instantly
+  useEffect(() => {
+    const ch = supabase.channel("members-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "active_timers" }, () => {
+        qc.invalidateQueries({ queryKey: ["members_timers"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance" }, () => {
+        qc.invalidateQueries({ queryKey: ["members_attendance"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [qc]);
+
+  const timerMap: Record<string, any> = {};
   for (const t of activeTimers as any[]) timerMap[t.user_id] = t;
-  const attMap: Record<string,any> = {};
+  const attMap: Record<string, any> = {};
   for (const a of attendances as any[]) attMap[a.user_id] = a;
 
   const getStatus = (userId: string) => {
     if (!attMap[userId]) return "offline";
-    if (timerMap[userId]) return timerMap[userId].mode === "break" ? "break" : "active";
-    return "idle";
+    const t = timerMap[userId];
+    if (!t) return "idle";
+    if (t.mode === "break") return "break";
+    return "active";
   };
 
-  const statusDot = (status: string) => {
-    if (status === "active") return "bg-green-500 animate-pulse";
-    if (status === "idle") return "bg-yellow-400";
-    if (status === "break") return "bg-warning animate-pulse";
-    return "bg-muted-foreground/40";
-  };
+  const dotClass = (s: string) => ({
+    active: "bg-green-500 animate-pulse",
+    idle: "bg-yellow-400",
+    break: "bg-yellow-500 animate-pulse",
+    offline: "bg-muted-foreground/40",
+  }[s] || "bg-muted-foreground/40");
 
-  const statusLabel = (status: string) => {
-    if (status === "active") return { text: "Tracking", color: "text-green-500" };
-    if (status === "idle") return { text: "Online — idle", color: "text-yellow-500" };
-    if (status === "break") return { text: "On break", color: "text-warning" };
-    return { text: "Offline", color: "text-muted-foreground" };
-  };
+  const rowClass = (s: string) => ({
+    active: "border-primary/30 bg-accent/20",
+    idle: "border-yellow-400/30 bg-yellow-400/5",
+    break: "border-yellow-500/30 bg-yellow-500/5",
+    offline: "border-border bg-secondary/30 opacity-60",
+  }[s] || "border-border bg-secondary/30");
+
+  const statusText = (s: string) => ({
+    active: { label: "Tracking", color: "text-green-500" },
+    idle: { label: "Online — idle", color: "text-yellow-500" },
+    break: { label: "On break", color: "text-yellow-500" },
+    offline: { label: "Offline", color: "text-muted-foreground" },
+  }[s] || { label: "Offline", color: "text-muted-foreground" });
 
   const deptLabel = myProfile?.department || "Your Team";
+  const online = (teammates as any[]).filter(t => getStatus(t.user_id) !== "offline");
+  const tracking = (teammates as any[]).filter(t => getStatus(t.user_id) === "active");
+  const offline = (teammates as any[]).filter(t => getStatus(t.user_id) === "offline");
 
   return (
     <div className="space-y-5">
@@ -85,62 +121,66 @@ const Members = () => {
         <Users className="h-5 w-5 text-primary" /> {deptLabel}
       </h2>
 
-      {/* Status summary */}
       <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Online", value: (teammates as any[]).filter(t => getStatus(t.user_id) !== "offline").length, color: "text-green-500" },
-          { label: "Tracking", value: (teammates as any[]).filter(t => getStatus(t.user_id) === "active").length, color: "text-primary" },
-          { label: "Offline", value: (teammates as any[]).filter(t => getStatus(t.user_id) === "offline").length, color: "text-muted-foreground" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="glass-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className={`text-2xl font-bold ${color}`}>{value}</p>
-          </div>
-        ))}
+        <div className="glass-card p-3 text-center"><p className="text-xs text-muted-foreground">Online</p><p className="text-2xl font-bold text-green-500">{online.length}</p></div>
+        <div className="glass-card p-3 text-center"><p className="text-xs text-muted-foreground">Tracking</p><p className="text-2xl font-bold text-primary">{tracking.length}</p></div>
+        <div className="glass-card p-3 text-center"><p className="text-xs text-muted-foreground">Offline</p><p className="text-2xl font-bold text-muted-foreground">{offline.length}</p></div>
       </div>
 
-      {/* Member list */}
       <div className="glass-card p-4 space-y-2">
         {(teammates as any[]).map((p: any) => {
           const status = getStatus(p.user_id);
-          const sl = statusLabel(status);
+          const st = statusText(status);
           const timer = timerMap[p.user_id];
           const att = attMap[p.user_id];
           const liveElapsed = timer ? Math.floor((now - new Date(timer.started_at).getTime()) / 1000) : 0;
-          const timeInElapsed = att ? Math.floor((now - new Date(att.time_in_at).getTime()) / 1000) : 0;
           const isMe = p.user_id === user?.id;
+          const taskName = (timer as any)?.tasks?.name;
 
           return (
-            <div key={p.user_id} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${status === "active" ? "border-primary/30 bg-accent/20" : status === "idle" ? "border-yellow-400/30 bg-yellow-400/5" : status === "break" ? "border-warning/30 bg-warning/5" : "border-border bg-secondary/30 opacity-60"}`}>
-              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(status)}`} />
+            <div key={p.user_id} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${rowClass(status)}`}>
+              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotClass(status)}`} />
               <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
-                {(p.display_name||"?").charAt(0).toUpperCase()}
+                {(p.display_name || "?").charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}{isMe && <span className="text-xs text-muted-foreground ml-1">(you)</span>}</p>
-                </div>
-                <p className="text-xs text-muted-foreground truncate">{p.job_title||"—"}</p>
-                {timer && status === "break" && (
-                  <p className="text-xs text-warning font-medium">☕ On Break</p>
+                <p className="text-sm font-medium text-foreground truncate">
+                  {p.display_name || "Unnamed"}
+                  {isMe && <span className="text-xs text-muted-foreground ml-1">(you)</span>}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">{p.job_title || "—"}</p>
+                {/* Current task — visible to all teammates */}
+                {timer && taskName && (
+                  <p className="text-xs text-primary truncate">↳ {taskName}</p>
                 )}
-                {timer && status === "active" && (
-                  <p className="text-xs text-muted-foreground truncate">🔧 {timer.tasks?.name || "Working"}</p>
-                )}
-                {timer && status === "break" && timer.tasks?.name && (
-                  <p className="text-xs text-muted-foreground truncate">Task: {timer.tasks.name}</p>
+                {timer && !taskName && status === "active" && (
+                  <p className="text-xs text-muted-foreground truncate">↳ Working</p>
                 )}
               </div>
-              <div className="text-right flex-shrink-0 space-y-0.5">
-                <p className={`text-xs font-medium ${sl.color}`}>{sl.text}</p>
-                {timer && <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>}
-                {att && <p className="text-xs text-muted-foreground">In: {new Date(att.time_in_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
+              <div className="text-right flex-shrink-0 space-y-0.5 min-w-[80px]">
+                <p className={`text-xs font-medium ${st.color}`}>{st.label}</p>
+                {/* Live timer — updates every second */}
+                {status === "active" && (
+                  <p className="text-xs font-mono text-primary">{fmt(liveElapsed)}</p>
+                )}
+                {status === "break" && (
+                  <p className="text-xs font-mono text-yellow-500">{fmt(liveElapsed)}</p>
+                )}
+                {att && (
+                  <p className="text-xs text-muted-foreground">
+                    In {new Date(att.time_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
               </div>
             </div>
           );
         })}
         {(teammates as any[]).length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-6">No teammates found{myProfile?.department ? ` in ${myProfile.department}` : " — department not set"}.</p>
+          <p className="text-xs text-muted-foreground text-center py-6">
+            {myProfile?.department
+              ? `No teammates found in ${myProfile.department}.`
+              : "Department not set — contact your admin."}
+          </p>
         )}
       </div>
     </div>
