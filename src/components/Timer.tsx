@@ -168,39 +168,66 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
   }, [isRunning]);
 
-  // ── Screenshot — captures the actual page using html2canvas loaded from CDN ──
+  // ── Screenshot — capture real desktop using getDisplayMedia ──
   const doScreenshot = async () => {
     if (!user) return;
     try {
-      // Dynamically load html2canvas from CDN if not already loaded
-      if (!(window as any).html2canvas) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("Failed to load html2canvas"));
-          document.head.appendChild(s);
-        });
-      }
-      const canvas = await (window as any).html2canvas(document.body, {
-        scale: 0.5,          // half resolution to keep file size small
-        useCORS: true,
-        logging: false,
-        backgroundColor: null,
+      // Request screen capture permission
+      const stream = await (navigator.mediaDevices as any).getDisplayMedia({
+        video: { mediaSource: "screen", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
       });
-      const imageData = canvas.toDataURL("image/jpeg", 0.7); // JPEG at 70% quality
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new (window as any).ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      track.stop(); // release immediately after capture
+
+      // Draw to canvas at half resolution
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(bitmap.width / 2);
+      canvas.height = Math.floor(bitmap.height / 2);
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      const imageData = canvas.toDataURL("image/jpeg", 0.75);
       const currentElapsed = elapsedRef.current;
       const currentTaskId = activeTaskIdRef.current;
-      await supabase.from("screenshots").insert({
+      const { error } = await supabase.from("screenshots").insert({
         user_id: user.id,
         image_data: imageData,
         timer_elapsed: currentElapsed,
         task_id: currentTaskId || null,
       });
+      if (error) throw error;
       toast({ title: "Screenshot captured", description: `Next in ${ssInterval / 60} min` });
     } catch (err: any) {
-      console.error("Screenshot error:", err);
-      toast({ title: "Screenshot failed", description: err?.message || "Unknown error", variant: "destructive" });
+      // User denied or browser doesn't support — fall back to page capture
+      try {
+        if (!(window as any).html2canvas) {
+          await new Promise<void>((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+            s.onload = () => resolve();
+            s.onerror = () => reject(new Error("html2canvas failed to load"));
+            document.head.appendChild(s);
+          });
+        }
+        const canvas = await (window as any).html2canvas(document.body, {
+          scale: 0.5, useCORS: true, logging: false, backgroundColor: "#1a1a2e",
+        });
+        const imageData = canvas.toDataURL("image/jpeg", 0.75);
+        const { error } = await supabase.from("screenshots").insert({
+          user_id: user.id,
+          image_data: imageData,
+          timer_elapsed: elapsedRef.current,
+          task_id: activeTaskIdRef.current || null,
+        });
+        if (error) throw error;
+        toast({ title: "Screenshot captured (page only)", description: `Next in ${ssInterval / 60} min` });
+      } catch (fallbackErr: any) {
+        console.error("Screenshot fallback error:", fallbackErr);
+        toast({ title: "Screenshot failed", description: "Please allow screen capture permission.", variant: "destructive" });
+      }
     }
   };
 
