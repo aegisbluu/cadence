@@ -15,7 +15,6 @@ const Reports = ({ projectId }: { projectId?: string }) => {
   const { user } = useAuth();
   const { isAdmin } = useRole();
   const [range, setRange] = useState("week");
-  const [filterProject, setFilterProject] = useState("all");
   const [filterTask, setFilterTask] = useState("all");
   const [userSearch, setUserSearch] = useState("");
   const [selectedUserId, setSelectedUserId] = useState("me");
@@ -61,15 +60,12 @@ const Reports = ({ projectId }: { projectId?: string }) => {
     enabled: !!targetUserId,
   });
 
-  // All projects/tasks from entries for filter dropdowns
-  const projectOptions = Array.from(new Set(entries.map(e => (e.projects as any)?.name || "No Project")));
+  // Task filter options from entries
   const taskOptions = Array.from(new Set(entries.map(e => (e.tasks as any)?.name || "No Task")));
 
   // Apply filters
   const filtered = entries.filter(e => {
-    const pName = (e.projects as any)?.name || "No Project";
     const tName = (e.tasks as any)?.name || "No Task";
-    if (filterProject !== "all" && pName !== filterProject) return false;
     if (filterTask !== "all" && tName !== filterTask) return false;
     return true;
   });
@@ -161,15 +157,8 @@ const Reports = ({ projectId }: { projectId?: string }) => {
         </div>
       )}
 
-      {/* Filters: project + task */}
+      {/* Filter: task only */}
       <div className="flex gap-2 flex-wrap">
-        <Select value={filterProject} onValueChange={v => { setFilterProject(v); setFilterTask("all"); }}>
-          <SelectTrigger className="w-[160px] bg-secondary border-border text-sm h-8"><SelectValue placeholder="All Projects" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projectOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-          </SelectContent>
-        </Select>
         <Select value={filterTask} onValueChange={setFilterTask}>
           <SelectTrigger className="w-[160px] bg-secondary border-border text-sm h-8"><SelectValue placeholder="All Tasks" /></SelectTrigger>
           <SelectContent>
@@ -177,9 +166,9 @@ const Reports = ({ projectId }: { projectId?: string }) => {
             {taskOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
           </SelectContent>
         </Select>
-        {(filterProject !== "all" || filterTask !== "all") && (
-          <button onClick={() => { setFilterProject("all"); setFilterTask("all"); }} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border hover:bg-secondary transition-colors">
-            Clear filters
+        {filterTask !== "all" && (
+          <button onClick={() => setFilterTask("all")} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border hover:bg-secondary transition-colors">
+            Clear filter
           </button>
         )}
       </div>
@@ -220,7 +209,14 @@ const Reports = ({ projectId }: { projectId?: string }) => {
               <Pie data={pieData} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, value }) => `${name}: ${value}h`}>
                 {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
               </Pie>
-              <Tooltip contentStyle={{ backgroundColor: "hsl(240,5%,10%)", border: "1px solid hsl(240,4%,18%)", borderRadius: "8px" }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: "hsl(240,5%,10%)", border: "1px solid hsl(240,4%,18%)", borderRadius: "8px" }}
+                itemStyle={{ color: "hsl(0,0%,96%)" }}
+                formatter={(value: any, name: any, props: any) => [
+                  <span style={{ color: props.payload.color }}>{value}h</span>,
+                  <span style={{ color: props.payload.color }}>{name}</span>
+                ]}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
