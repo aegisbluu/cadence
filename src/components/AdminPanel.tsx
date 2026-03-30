@@ -199,8 +199,8 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
+    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
+      await supabase.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
