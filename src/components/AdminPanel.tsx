@@ -199,8 +199,8 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
+    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
+      await supabase.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
@@ -512,7 +512,7 @@ const AdminPanel = () => {
                           <SelectTrigger className="bg-card border-border text-xs h-7 w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole })}><Save className="h-3 w-3 mr-1" />Save</Button>
+                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole as "admin" | "user" })}><Save className="h-3 w-3 mr-1" />Save</Button>
                         <Button size="sm" variant="ghost" className="h-7 px-1" onClick={() => setEditingRoleId(null)}><X className="h-3 w-3" /></Button>
                       </>
                     ) : (
