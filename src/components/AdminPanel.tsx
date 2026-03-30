@@ -81,6 +81,26 @@ const AdminPanel = () => {
     enabled: !!user,
   });
 
+  // Fetch auth user list to get emails (admin only via service key not available client-side)
+  // We store emails in profiles via the handle_new_user trigger — add email column query
+  const { data: authEmails = {} } = useQuery({
+    queryKey: ["admin_auth_emails"],
+    queryFn: async () => {
+      // We get emails from auth.users via the profiles which stores user_id
+      // Use a workaround: fetch from time_entries or dtr_log which have user_id
+      // Best approach: fetch profiles and use display_name; for email we need RPC
+      // Since Supabase admin API isn't available client-side, we'll use a raw query
+      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const u of data) map[u.id] = u.email;
+        return map;
+      }
+      return {} as Record<string, string>;
+    },
+    enabled: !!user,
+  });
+
   const { data: memberStats = {} } = useQuery({
     queryKey: ["admin_member_stats"],
     queryFn: async () => {
@@ -199,8 +219,8 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role" });
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
@@ -234,12 +254,22 @@ const AdminPanel = () => {
 
   const deleteAccount = useMutation({
     mutationFn: async (userId: string) => {
+      // Delete in dependency order so FK constraints don't block
       await supabase.from("active_timers").delete().eq("user_id", userId);
       await supabase.from("attendance").delete().eq("user_id", userId);
       await supabase.from("dtr_log").delete().eq("user_id", userId);
       await supabase.from("screenshots").delete().eq("user_id", userId);
+      await supabase.from("task_notes").delete().eq("user_id", userId);
+      await supabase.from("time_entries").delete().eq("user_id", userId);
+      await supabase.from("tasks").delete().eq("user_id", userId);
       await supabase.from("user_roles").delete().eq("user_id", userId);
-      await supabase.from("profiles").delete().eq("user_id", userId);
+      const { error } = await supabase.from("profiles").delete().eq("user_id", userId);
+      if (error) throw error;
+    },
+    onMutate: (userId: string) => {
+      // Optimistically remove from cache immediately so UI updates right away
+      qc.setQueryData(["admin_profiles"], (old: any[]) => (old || []).filter((p: any) => p.user_id !== userId));
+      qc.setQueryData(["admin_roles"], (old: any[]) => (old || []).filter((r: any) => r.user_id !== userId));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin_profiles"] });
@@ -248,7 +278,11 @@ const AdminPanel = () => {
       setDeleteConfirmName("");
       toast({ title: "Account deleted", description: "This action cannot be undone." });
     },
-    onError: (e: any) => toast({ title: "Error deleting account", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      // Refetch on error to restore correct state
+      qc.invalidateQueries({ queryKey: ["admin_profiles"] });
+      toast({ title: "Error deleting account", description: e.message, variant: "destructive" });
+    },
   });
 
   return (
@@ -279,6 +313,33 @@ const AdminPanel = () => {
           </div>
         </div>
       )}
+
+      {/* Screenshot expanded lightbox */}
+      {expandedSs && (() => {
+        const s = (screenshots as any[]).find((x: any) => x.id === expandedSs);
+        if (!s) return null;
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm" onClick={() => setExpandedSs(null)}>
+            <div className="bg-card border border-border rounded-xl p-3 max-w-4xl w-full mx-4 space-y-2" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{s.display_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {format(new Date(s.taken_at), "MMM d, yyyy h:mm a")}
+                    {s.tasks?.name ? ` · ${s.tasks.name}` : ""}
+                    {s.timer_elapsed ? ` · ${fmtHM(s.timer_elapsed)}` : ""}
+                  </p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setExpandedSs(null)}><X className="h-4 w-4" /></Button>
+              </div>
+              {s.image_data
+                ? <img src={s.image_data} alt="Screenshot" className="w-full rounded border border-border/30 max-h-[70vh] object-contain" />
+                : <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">No image data available</div>
+              }
+            </div>
+          </div>
+        );
+      })()}
 
       <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
         <Settings className="h-5 w-5 text-primary" /> Admin Dashboard
@@ -431,17 +492,29 @@ const AdminPanel = () => {
           <div className="glass-card p-4">
             <h3 className="text-sm font-semibold text-foreground mb-3">Today's Summary</h3>
             <div className="space-y-2">
-              {[...(allProfiles as any[])].sort((a: any, b: any) => ((memberStats as any)[b.user_id]?.today || 0) - ((memberStats as any)[a.user_id]?.today || 0)).map((p: any) => {
+              {[...(allProfiles as any[])].sort((a: any, b: any) => {
+                // Sort by today tracked + live Time In elapsed
+                const sa = (memberStats as any)[a.user_id]?.today || 0;
+                const sb = (memberStats as any)[b.user_id]?.today || 0;
+                const la = attMap[a.user_id] ? Math.floor((now - new Date(attMap[a.user_id].time_in_at).getTime()) / 1000) : 0;
+                const lb = attMap[b.user_id] ? Math.floor((now - new Date(attMap[b.user_id].time_in_at).getTime()) / 1000) : 0;
+                return (sb + lb) - (sa + la);
+              }).map((p: any) => {
                 const s = (memberStats as any)[p.user_id] || { today: 0 };
-                const pct = s.today > 0 ? Math.min(100, Math.round((s.today / 28800) * 100)) : 0;
+                // Add live Time In duration if user is currently timed in
+                const liveTimeIn = attMap[p.user_id]
+                  ? Math.floor((now - new Date(attMap[p.user_id].time_in_at).getTime()) / 1000)
+                  : 0;
+                const totalToday = s.today + liveTimeIn;
+                const pct = totalToday > 0 ? Math.min(100, Math.round((totalToday / 28800) * 100)) : 0;
                 return (
                   <div key={p.user_id}>
                     <div className="flex items-center justify-between mb-0.5">
                       <span className="text-xs text-foreground">{p.display_name || "Unnamed"}</span>
-                      <span className="text-xs font-mono text-muted-foreground">{fmtHM(s.today)}</span>
+                      <span className="text-xs font-mono text-muted-foreground">{fmtHM(totalToday)}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "hsl(270,70%,60%)" }} />
+                      <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, background: "hsl(270,70%,60%)" }} />
                     </div>
                   </div>
                 );
@@ -474,8 +547,8 @@ const AdminPanel = () => {
                     <tr key={d.id} className="border-b border-border/50 hover:bg-secondary/30">
                       <td className="py-2 px-3 text-foreground font-medium">{d.display_name}</td>
                       <td className="py-2 px-3 text-muted-foreground">{d.time_in ? format(new Date(d.time_in), "h:mm a") : "—"}</td>
-                      <td className="py-2 px-3">{d.time_out ? <span className="text-muted-foreground">{format(new Date(d.time_out), "h:mm a")}</span> : <span className="text-green-500 text-xs">Active</span>}</td>
-                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : d.time_out ? "—" : <span className="text-xs text-muted-foreground">ongoing</span>}</td>
+                      <td className="py-2 px-3 text-muted-foreground">{d.time_out ? format(new Date(d.time_out), "h:mm a") : "—"}</td>
+                      <td className="py-2 px-3 text-right font-mono text-foreground">{d.duration_seconds ? fmtHM(d.duration_seconds) : "—"}</td>
                     </tr>
                   ))}
                   {(dtrLogs as any[]).length === 0 && (
@@ -512,7 +585,7 @@ const AdminPanel = () => {
                           <SelectTrigger className="bg-card border-border text-xs h-7 w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole as "admin" | "user" })}><Save className="h-3 w-3 mr-1" />Save</Button>
+                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole })}><Save className="h-3 w-3 mr-1" />Save</Button>
                         <Button size="sm" variant="ghost" className="h-7 px-1" onClick={() => setEditingRoleId(null)}><X className="h-3 w-3" /></Button>
                       </>
                     ) : (
@@ -569,6 +642,14 @@ const AdminPanel = () => {
 
         {/* ── SCREENSHOTS — grid layout ── */}
         <TabsContent value="screenshots" className="space-y-4">
+          {/* Capture interval settings — shown first */}
+          <div className="glass-card p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">Capture Intervals</h3>
+            {(allProfiles as any[]).map((p: any) => (
+              <ScreenshotRow key={p.user_id} profile={p} onSave={interval => updateScreenshot.mutate({ userId: p.user_id, interval })} />
+            ))}
+          </div>
+
           <div className="glass-card p-4 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -632,34 +713,9 @@ const AdminPanel = () => {
               )}
             </div>
 
-            {/* Expanded view */}
-            {expandedSs && (() => {
-              const s = (screenshots as any[]).find(x => x.id === expandedSs);
-              if (!s) return null;
-              return (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm" onClick={() => setExpandedSs(null)}>
-                  <div className="bg-card border border-border rounded-xl p-3 max-w-4xl w-full mx-4 space-y-2" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{s.display_name}</p>
-                        <p className="text-xs text-muted-foreground">{format(new Date(s.taken_at), "MMM d, yyyy h:mm a")}{s.tasks?.name ? ` · ${s.tasks.name}` : ""}{s.timer_elapsed ? ` · ${fmtHM(s.timer_elapsed)}` : ""}</p>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => setExpandedSs(null)}><X className="h-4 w-4" /></Button>
-                    </div>
-                    <img src={s.image_data} alt="" className="w-full rounded border border-border/30 max-h-[70vh] object-contain" />
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Expanded view — rendered outside the grid so it always has full data */}
           </div>
 
-          {/* Capture interval settings */}
-          <div className="glass-card p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">Capture Intervals</h3>
-            {(allProfiles as any[]).map((p: any) => (
-              <ScreenshotRow key={p.user_id} profile={p} onSave={interval => updateScreenshot.mutate({ userId: p.user_id, interval })} />
-            ))}
-          </div>
         </TabsContent>
 
         {/* ── ADMINISTRATION ── */}
@@ -681,8 +737,8 @@ const AdminPanel = () => {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">{p.display_name || "Unnamed"}</p>
-                      <p className="text-xs text-muted-foreground truncate">{p.job_title || "—"}{p.department ? ` · ${p.department}` : ""}</p>
-                      <p className="text-xs text-muted-foreground/70 truncate font-mono">{p.user_id.slice(0, 16)}…</p>
+                      <p className="text-xs text-muted-foreground truncate">{(authEmails as any)[p.user_id] || p.job_title || "—"}</p>
+                      {p.department && <p className="text-xs text-muted-foreground truncate">{p.department}</p>}
                     </div>
                   </div>
                   <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0 gap-1"
