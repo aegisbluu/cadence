@@ -50,6 +50,9 @@ const AdminPanel = () => {
   // DTR state
   const [dtrDate, setDtrDate] = useState(new Date().toISOString().split("T")[0]);
 
+  // Track locally-deleted user IDs so they don't reappear after cache invalidation
+  const [deletedUserIds, setDeletedUserIds] = useState<Set<string>>(new Set());
+
   // Live clock ticker
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
@@ -90,8 +93,7 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      const { data } = await supabase.rpc("get_user_emails");
-      if (!data) return {} as Record<string, string>;
+      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
       if (data) {
         const map: Record<string, string> = {};
         for (const u of data) map[u.id] = u.email;
@@ -178,13 +180,14 @@ const AdminPanel = () => {
     return () => { supabase.removeChannel(ch); };
   }, [qc]);
 
-  // Derived maps
+  // Derived maps — filter out locally-deleted users
+  const visibleProfiles = (allProfiles as any[]).filter((p: any) => !deletedUserIds.has(p.user_id));
   const timerMap: Record<string, any> = {};
   for (const t of activeTimers as any[]) timerMap[t.user_id] = t;
   const attMap: Record<string, any> = {};
   for (const a of allAttendance as any[]) attMap[a.user_id] = a;
   const getRoleForUser = (uid: string) => (allRoles as any[]).find(r => r.user_id === uid)?.role || "user";
-  const departments = Array.from(new Set((allProfiles as any[]).map((p: any) => p.department || "Unassigned"))).sort() as string[];
+  const departments = Array.from(new Set(visibleProfiles.map((p: any) => p.department || "Unassigned"))).sort() as string[];
 
   // ── Mutations ──
   const createTask = useMutation({
@@ -220,7 +223,7 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
       await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
@@ -255,33 +258,31 @@ const AdminPanel = () => {
 
   const deleteAccount = useMutation({
     mutationFn: async (userId: string) => {
-      // Delete in dependency order so FK constraints don't block
-      await supabase.from("active_timers").delete().eq("user_id", userId);
-      await supabase.from("attendance").delete().eq("user_id", userId);
-      await supabase.from("dtr_log").delete().eq("user_id", userId);
-      await supabase.from("screenshots").delete().eq("user_id", userId);
-      await supabase.from("task_notes").delete().eq("user_id", userId);
-      await supabase.from("time_entries").delete().eq("user_id", userId);
-      await supabase.from("tasks").delete().eq("user_id", userId);
-      await supabase.from("user_roles").delete().eq("user_id", userId);
-      const { error } = await supabase.from("profiles").delete().eq("user_id", userId);
+      // Use the server-side RPC which runs as SECURITY DEFINER and bypasses RLS
+      const { error } = await supabase.rpc("admin_delete_user", { target_user_id: userId });
       if (error) throw error;
+      return userId;
     },
     onMutate: (userId: string) => {
-      // Optimistically remove from cache immediately so UI updates right away
-      qc.setQueryData(["admin_profiles"], (old: any[]) => (old || []).filter((p: any) => p.user_id !== userId));
-      qc.setQueryData(["admin_roles"], (old: any[]) => (old || []).filter((r: any) => r.user_id !== userId));
+      // Add to local deleted set FIRST — this filters the user from all rendered lists
+      // even after cache invalidation causes a re-fetch
+      setDeletedUserIds(prev => new Set([...prev, userId]));
     },
-    onSuccess: () => {
+    onSuccess: (_data, userId) => {
+      // Invalidate all caches — even when they re-fetch, deletedUserIds will filter the user out
       qc.invalidateQueries({ queryKey: ["admin_profiles"] });
       qc.invalidateQueries({ queryKey: ["admin_roles"] });
+      qc.invalidateQueries({ queryKey: ["admin_member_stats"] });
+      qc.invalidateQueries({ queryKey: ["admin_dtr"] });
+      qc.invalidateQueries({ queryKey: ["admin_active_timers"] });
+      qc.invalidateQueries({ queryKey: ["admin_attendance"] });
       setDeleteConfirmUserId(null);
       setDeleteConfirmName("");
-      toast({ title: "Account deleted", description: "This action cannot be undone." });
+      toast({ title: "Account deleted permanently" });
     },
-    onError: (e: any) => {
-      // Refetch on error to restore correct state
-      qc.invalidateQueries({ queryKey: ["admin_profiles"] });
+    onError: (e: any, userId) => {
+      // Remove from deleted set on error so user reappears
+      setDeletedUserIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
       toast({ title: "Error deleting account", description: e.message, variant: "destructive" });
     },
   });
@@ -361,7 +362,7 @@ const AdminPanel = () => {
         <TabsContent value="departments" className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: "Total members", value: (allProfiles as any[]).length },
+              { label: "Total members", value: visibleProfiles.length },
               { label: "Online now", value: (allAttendance as any[]).length },
               { label: "Departments", value: departments.filter(d => d !== "Unassigned").length },
               { label: "Tracking", value: (activeTimers as any[]).filter((t: any) => t.mode === "work").length },
@@ -374,7 +375,7 @@ const AdminPanel = () => {
           </div>
 
           {departments.map(dept => {
-            const members = (allProfiles as any[]).filter((p: any) => (p.department || "Unassigned") === dept);
+            const members = visibleProfiles.filter((p: any) => (p.department || "Unassigned") === dept);
             return (
               <div key={dept} className="glass-card p-4 space-y-3">
                 <div className="flex items-center gap-2">
@@ -463,7 +464,7 @@ const AdminPanel = () => {
               </span>
             </div>
             {/* Only show users who are online (have attendance record) */}
-            {(allProfiles as any[]).filter((p: any) => attMap[p.user_id]).map((p: any) => {
+            {visibleProfiles.filter((p: any) => attMap[p.user_id]).map((p: any) => {
               const timer = timerMap[p.user_id];
               const onBreak = timer?.mode === "break";
               const liveEl = timer ? Math.floor((now - new Date(timer.started_at).getTime()) / 1000) : 0;
@@ -485,7 +486,7 @@ const AdminPanel = () => {
                 </div>
               );
             })}
-            {(allProfiles as any[]).filter((p: any) => attMap[p.user_id]).length === 0 && (
+            {visibleProfiles.filter((p: any) => attMap[p.user_id]).length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-6">No users online right now</p>
             )}
           </div>
@@ -493,7 +494,7 @@ const AdminPanel = () => {
           <div className="glass-card p-4">
             <h3 className="text-sm font-semibold text-foreground mb-3">Today's Summary</h3>
             <div className="space-y-2">
-              {[...(allProfiles as any[])].sort((a: any, b: any) => {
+              {[...visibleProfiles].sort((a: any, b: any) => {
                 // Sort by today tracked + live Time In elapsed
                 const sa = (memberStats as any)[a.user_id]?.today || 0;
                 const sb = (memberStats as any)[b.user_id]?.today || 0;
@@ -567,7 +568,7 @@ const AdminPanel = () => {
             <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Shield className="h-4 w-4 text-primary" /> User Roles
             </h3>
-            {(allProfiles as any[]).map((p: any) => {
+            {visibleProfiles.map((p: any) => {
               const cur = getRoleForUser(p.user_id);
               const isEd = editingRoleId === p.user_id;
               return (
@@ -586,7 +587,7 @@ const AdminPanel = () => {
                           <SelectTrigger className="bg-card border-border text-xs h-7 w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole as "admin" | "user" })}><Save className="h-3 w-3 mr-1" />Save</Button>
+                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole })}><Save className="h-3 w-3 mr-1" />Save</Button>
                         <Button size="sm" variant="ghost" className="h-7 px-1" onClick={() => setEditingRoleId(null)}><X className="h-3 w-3" /></Button>
                       </>
                     ) : (
@@ -646,7 +647,7 @@ const AdminPanel = () => {
           {/* Capture interval settings — shown first */}
           <div className="glass-card p-4 space-y-3">
             <h3 className="text-sm font-semibold text-foreground">Capture Intervals</h3>
-            {(allProfiles as any[]).map((p: any) => (
+            {visibleProfiles.map((p: any) => (
               <ScreenshotRow key={p.user_id} profile={p} onSave={interval => updateScreenshot.mutate({ userId: p.user_id, interval })} />
             ))}
           </div>
@@ -660,7 +661,7 @@ const AdminPanel = () => {
                 <Select value={ssUserFilter} onValueChange={setSsUserFilter}>
                   <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="Filter by user" /></SelectTrigger>
                   <SelectContent>
-                    {(allProfiles as any[]).map((p: any) => <SelectItem key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"}</SelectItem>)}
+                    {visibleProfiles.map((p: any) => <SelectItem key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 {ssUserFilter !== "all" && (
@@ -730,7 +731,7 @@ const AdminPanel = () => {
               ⚠ Deleted accounts and all associated data (time entries, screenshots, DTR records) are permanently removed and cannot be restored.
             </p>
             <div className="space-y-2">
-              {(allProfiles as any[]).filter((p: any) => p.user_id !== user?.id).map((p: any) => (
+              {visibleProfiles.filter((p: any) => p.user_id !== user?.id).map((p: any) => (
                 <div key={p.user_id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-secondary/50 border border-border/50">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
@@ -748,7 +749,7 @@ const AdminPanel = () => {
                   </Button>
                 </div>
               ))}
-              {(allProfiles as any[]).filter((p: any) => p.user_id !== user?.id).length === 0 && (
+              {visibleProfiles.filter((p: any) => p.user_id !== user?.id).length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-4">No other accounts to manage</p>
               )}
             </div>
