@@ -90,7 +90,8 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
+      const { data } = await supabase.rpc("get_user_emails");
+      if (!data) return {} as Record<string, string>;
       if (data) {
         const map: Record<string, string> = {};
         for (const u of data) map[u.id] = u.email;
@@ -219,7 +220,7 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
       await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
@@ -585,7 +586,7 @@ const AdminPanel = () => {
                           <SelectTrigger className="bg-card border-border text-xs h-7 w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole })}><Save className="h-3 w-3 mr-1" />Save</Button>
+                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole as "admin" | "user" })}><Save className="h-3 w-3 mr-1" />Save</Button>
                         <Button size="sm" variant="ghost" className="h-7 px-1" onClick={() => setEditingRoleId(null)}><X className="h-3 w-3" /></Button>
                       </>
                     ) : (
