@@ -4,17 +4,19 @@ import { useRole } from "@/hooks/useRole";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import Timer from "@/components/Timer";
+import Timesheet from "@/components/Timesheet";
+import Leaves from "@/components/Leaves";
 import Reports from "@/components/Reports";
 import AdminPanel from "@/components/AdminPanel";
 import Members from "@/components/Members";
 import { Button } from "@/components/ui/button";
-import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown, Home, Users } from "lucide-react";
+import { Clock, BarChart3, LogOut, LayoutDashboard, Shield, Sun, Moon, Settings, X, ChevronDown, Home, Users, FileText, CalendarDays } from "lucide-react";
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();
   const { isAdmin } = useRole();
   const queryClient = useQueryClient();
-  const [view, setView] = useState<"timer" | "reports" | "admin" | "members">("timer");
+  const [view, setView] = useState<"timer" | "reports" | "admin" | "members" | "timesheet" | "leaves">("timer");
   const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("cadence-theme") as any) || "dark");
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -45,6 +47,12 @@ const Dashboard = () => {
       </button>
       <button onClick={() => setView("members")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "members" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
         <Users className="h-4 w-4" /> Members
+      </button>
+      <button onClick={() => setView("timesheet")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "timesheet" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+        <FileText className="h-4 w-4" /> Timesheet
+      </button>
+      <button onClick={() => setView("leaves")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "leaves" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+        <CalendarDays className="h-4 w-4" /> Leaves
       </button>
       {isAdmin && (
         <button onClick={() => setView("admin")} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${view === "admin" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
@@ -130,6 +138,8 @@ const Dashboard = () => {
               {view === "timer" && <Timer onEntryCreated={() => queryClient.invalidateQueries({ queryKey: ["time_entries_report"] })} />}
               {view === "reports" && <Reports />}
               {view === "members" && <Members />}
+              {view === "timesheet" && <Timesheet />}
+              {view === "leaves" && <Leaves />}
             </div>
           </div>
         )}
