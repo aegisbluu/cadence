@@ -93,12 +93,14 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
-      if (data) {
-        const map: Record<string, string> = {};
-        for (const u of data) map[u.id] = u.email;
-        return map;
-      }
+      try {
+        const { data } = await supabase.rpc("get_user_emails");
+        if (data) {
+          const map: Record<string, string> = {};
+          for (const u of data) map[u.id] = u.email;
+          return map;
+        }
+      } catch {}
       return {} as Record<string, string>;
     },
     enabled: !!user,
