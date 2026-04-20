@@ -158,28 +158,34 @@ const AdminPanel = () => {
 
   // Admin time logs
   const { data: adminTimeLogs = [], refetch: refetchTimeLogs } = useQuery({
-    queryKey: ["admin_time_logs", tlStatusFilter],
+    queryKey: ["admin_time_logs", tlStatusFilter, (allProfiles as any[]).length],
     queryFn: async () => {
       let q = supabase.from("manual_time_logs")
-        .select("*, tasks(name), profiles!manual_time_logs_user_id_fkey(display_name)")
+        .select("*, tasks(name)")
         .order("date", { ascending: false }).order("start_time");
       if (tlStatusFilter !== "all") q = q.eq("status", tlStatusFilter);
-      const { data } = await q;
-      return data || [];
+      const { data, error } = await q;
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
 
   // Admin leave requests
   const { data: adminLeaves = [], refetch: refetchLeaves } = useQuery({
-    queryKey: ["admin_leaves", leaveStatusFilter],
+    queryKey: ["admin_leaves", leaveStatusFilter, (allProfiles as any[]).length],
     queryFn: async () => {
       let q = supabase.from("leave_requests")
-        .select("*, leave_types(name, color), profiles!leave_requests_user_id_fkey(display_name)")
+        .select("*, leave_types(name, color)")
         .order("created_at", { ascending: false });
       if (leaveStatusFilter !== "all") q = q.eq("status", leaveStatusFilter);
-      const { data } = await q;
-      return data || [];
+      const { data, error } = await q;
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
@@ -193,12 +199,15 @@ const AdminPanel = () => {
 
   // Leave allocations
   const { data: allAllocations = [], refetch: refetchAllocations } = useQuery({
-    queryKey: ["admin_allocations"],
+    queryKey: ["admin_allocations", (allProfiles as any[]).length],
     queryFn: async () => {
-      const { data } = await supabase.from("leave_allocations")
-        .select("*, leave_types(name, color), profiles!leave_allocations_user_id_fkey(display_name)")
+      const { data, error } = await supabase.from("leave_allocations")
+        .select("*, leave_types(name, color)")
         .order("year", { ascending: false }).order("month", { ascending: false });
-      return data || [];
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
@@ -897,7 +906,7 @@ const AdminPanel = () => {
                 <div key={log.id} className="rounded-lg border border-border/50 bg-secondary/40 p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground">{(log.profiles as any)?.display_name || "Unknown"}</p>
+                      <p className="text-sm font-medium text-foreground">{log.display_name || "Unknown"}</p>
                       <p className="text-xs text-muted-foreground">{log.date} · {log.start_time?.slice(0,5)}–{log.end_time?.slice(0,5)} · {Math.floor(log.duration_minutes/60)}h {log.duration_minutes%60}m</p>
                       <p className="text-xs text-muted-foreground">{(log.tasks as any)?.name || log.description || "No task"}</p>
                       {log.admin_note && <p className="text-xs text-muted-foreground italic">Note: {log.admin_note}</p>}
@@ -954,7 +963,7 @@ const AdminPanel = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: leave.leave_types?.color || "#A855F7" }} />
-                        <p className="text-sm font-medium text-foreground">{(leave.profiles as any)?.display_name || "Unknown"}</p>
+                        <p className="text-sm font-medium text-foreground">{leave.display_name || "Unknown"}</p>
                       </div>
                       <p className="text-xs text-muted-foreground">{leave.leave_types?.name} · {leave.start_date}{leave.start_date !== leave.end_date ? ` – ${leave.end_date}` : ""} · {leave.days_requested} day{leave.days_requested !== 1 ? "s" : ""}</p>
                       {leave.reason && <p className="text-xs text-muted-foreground italic">{leave.reason}</p>}
@@ -1021,7 +1030,7 @@ const AdminPanel = () => {
             <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {(allAllocations as any[]).map((a: any) => (
                 <div key={a.id} className="flex items-center justify-between py-1 px-2 rounded bg-secondary/50 text-xs">
-                  <span className="text-foreground font-medium">{(a.profiles as any)?.display_name || "?"}</span>
+                  <span className="text-foreground font-medium">{a.display_name || "?"}</span>
                   <span className="text-muted-foreground">{a.leave_types?.name}</span>
                   <span className="text-muted-foreground">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][a.month-1]} {a.year}</span>
                   <span className="text-primary font-mono">{a.days_allocated}d</span>
