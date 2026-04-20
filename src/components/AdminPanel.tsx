@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Settings, ListTodo, Trash2, Pencil, Plus, Camera, Activity, Clock,
-  CheckCircle2, Building2, Save, X, Shield, FileText, UserMinus, AlertTriangle
+  Settings, ListTodo, Trash2, Pencil, Plus, Activity, Clock,
+  CheckCircle2, Building2, Save, X, Shield, FileText, UserMinus, AlertTriangle,
+  ClipboardList, CalendarDays, XCircle, AlertCircle
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -49,6 +50,23 @@ const AdminPanel = () => {
 
   // DTR state
   const [dtrDate, setDtrDate] = useState(new Date().toISOString().split("T")[0]);
+
+  // Time log review state
+  const [tlAdminNote, setTlAdminNote] = useState("");
+  const [tlReviewingId, setTlReviewingId] = useState<string|null>(null);
+  const [tlStatusFilter, setTlStatusFilter] = useState("pending");
+
+  // Leave review state
+  const [leaveAdminNote, setLeaveAdminNote] = useState("");
+  const [leaveReviewingId, setLeaveReviewingId] = useState<string|null>(null);
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState("pending");
+
+  // Leave allocation state
+  const [allocUserId, setAllocUserId] = useState("none");
+  const [allocTypeId, setAllocTypeId] = useState("none");
+  const [allocYear, setAllocYear] = useState(String(new Date().getFullYear()));
+  const [allocMonth, setAllocMonth] = useState(String(new Date().getMonth() + 1));
+  const [allocDays, setAllocDays] = useState("1.0");
 
   // Track locally-deleted user IDs so they don't reappear after cache invalidation
   const [deletedUserIds, setDeletedUserIds] = useState<Set<string>>(new Set());
@@ -93,14 +111,12 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      try {
-        const { data } = await supabase.rpc("get_user_emails");
-        if (data) {
-          const map: Record<string, string> = {};
-          for (const u of data) map[u.id] = u.email;
-          return map;
-        }
-      } catch {}
+      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const u of data) map[u.id] = u.email;
+        return map;
+      }
       return {} as Record<string, string>;
     },
     enabled: !!user,
@@ -136,6 +152,53 @@ const AdminPanel = () => {
     queryFn: async () => { const { data } = await supabase.from("attendance").select("*"); return data || []; },
     enabled: !!user,
     refetchInterval: 5000,
+  });
+
+  // Admin time logs
+  const { data: adminTimeLogs = [], refetch: refetchTimeLogs } = useQuery({
+    queryKey: ["admin_time_logs", tlStatusFilter],
+    queryFn: async () => {
+      let q = supabase.from("manual_time_logs")
+        .select("*, tasks(name), profiles!manual_time_logs_user_id_fkey(display_name)")
+        .order("date", { ascending: false }).order("start_time");
+      if (tlStatusFilter !== "all") q = q.eq("status", tlStatusFilter);
+      const { data } = await q;
+      return data || [];
+    },
+    enabled: !!user,
+  });
+
+  // Admin leave requests
+  const { data: adminLeaves = [], refetch: refetchLeaves } = useQuery({
+    queryKey: ["admin_leaves", leaveStatusFilter],
+    queryFn: async () => {
+      let q = supabase.from("leave_requests")
+        .select("*, leave_types(name, color), profiles!leave_requests_user_id_fkey(display_name)")
+        .order("created_at", { ascending: false });
+      if (leaveStatusFilter !== "all") q = q.eq("status", leaveStatusFilter);
+      const { data } = await q;
+      return data || [];
+    },
+    enabled: !!user,
+  });
+
+  // Leave types
+  const { data: leaveTypes = [], refetch: refetchLeaveTypes } = useQuery({
+    queryKey: ["admin_leave_types"],
+    queryFn: async () => { const { data } = await supabase.from("leave_types").select("*").order("name"); return data || []; },
+    enabled: !!user,
+  });
+
+  // Leave allocations
+  const { data: allAllocations = [], refetch: refetchAllocations } = useQuery({
+    queryKey: ["admin_allocations"],
+    queryFn: async () => {
+      const { data } = await supabase.from("leave_allocations")
+        .select("*, leave_types(name, color), profiles!leave_allocations_user_id_fkey(display_name)")
+        .order("year", { ascending: false }).order("month", { ascending: false });
+      return data || [];
+    },
+    enabled: !!user,
   });
 
   // DTR — fetch records for selected date, join profiles manually
@@ -225,8 +288,8 @@ const AdminPanel = () => {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "user" }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role" });
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
       await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
@@ -288,6 +351,59 @@ const AdminPanel = () => {
       toast({ title: "Error deleting account", description: e.message, variant: "destructive" });
     },
   });
+
+  const reviewTimeLog = useMutation({
+    mutationFn: async ({ id, status, note }: { id: string; status: string; note: string }) => {
+      const { error } = await supabase.from("manual_time_logs").update({
+        status, admin_note: note || null, reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
+      }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { refetchTimeLogs(); setTlReviewingId(null); setTlAdminNote(""); toast({ title: "Time log reviewed" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const reviewLeave = useMutation({
+    mutationFn: async ({ id, status, note }: { id: string; status: string; note: string }) => {
+      const { error } = await supabase.from("leave_requests").update({
+        status, admin_note: note || null, reviewed_by: user!.id, reviewed_at: new Date().toISOString(),
+      }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { refetchLeaves(); setLeaveReviewingId(null); setLeaveAdminNote(""); toast({ title: "Leave request reviewed" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const saveAllocation = useMutation({
+    mutationFn: async () => {
+      if (allocUserId === "none" || allocTypeId === "none") throw new Error("Select user and leave type");
+      const { error } = await supabase.from("leave_allocations").upsert({
+        user_id: allocUserId, leave_type_id: allocTypeId,
+        year: parseInt(allocYear), month: parseInt(allocMonth),
+        days_allocated: parseFloat(allocDays),
+      }, { onConflict: "user_id,leave_type_id,year,month" });
+      if (error) throw error;
+    },
+    onSuccess: () => { refetchAllocations(); toast({ title: "Allocation saved" }); },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteAllocation = useMutation({
+    mutationFn: async (id: string) => { await supabase.from("leave_allocations").delete().eq("id", id); },
+    onSuccess: () => refetchAllocations(),
+  });
+
+  // Status badge helper
+  const StatusBadge = ({ status }: { status: string }) => {
+    const cfg: Record<string, { cls: string; icon: any }> = {
+      pending:  { cls: "bg-yellow-400/10 text-yellow-500 border-yellow-400/30",  icon: AlertCircle },
+      approved: { cls: "bg-green-500/10 text-green-500 border-green-500/30",   icon: CheckCircle2 },
+      rejected: { cls: "bg-destructive/10 text-destructive border-destructive/30", icon: XCircle },
+    };
+    const c = cfg[status] || cfg.pending;
+    const Icon = c.icon;
+    return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${c.cls}`}><Icon className="h-3 w-3" />{status.charAt(0).toUpperCase() + status.slice(1)}</span>;
+  };
 
   return (
     <div className="space-y-4">
@@ -356,8 +472,9 @@ const AdminPanel = () => {
           <TabsTrigger value="dtr" className="gap-1 text-xs"><FileText className="h-3 w-3" /> DTR</TabsTrigger>
           <TabsTrigger value="roles" className="gap-1 text-xs"><Shield className="h-3 w-3" /> Roles</TabsTrigger>
           <TabsTrigger value="tasks" className="gap-1 text-xs"><ListTodo className="h-3 w-3" /> Tasks</TabsTrigger>
-          <TabsTrigger value="screenshots" className="gap-1 text-xs"><Camera className="h-3 w-3" /> Screenshots</TabsTrigger>
           <TabsTrigger value="administration" className="gap-1 text-xs"><UserMinus className="h-3 w-3" /> Administration</TabsTrigger>
+          <TabsTrigger value="timelogs" className="gap-1 text-xs"><ClipboardList className="h-3 w-3" /> Time Logs</TabsTrigger>
+          <TabsTrigger value="leaves" className="gap-1 text-xs"><CalendarDays className="h-3 w-3" /> Leaves</TabsTrigger>
         </TabsList>
 
         {/* ── DEPARTMENTS ── */}
@@ -589,7 +706,7 @@ const AdminPanel = () => {
                           <SelectTrigger className="bg-card border-border text-xs h-7 w-24"><SelectValue /></SelectTrigger>
                           <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole as "admin" | "user" })}><Save className="h-3 w-3 mr-1" />Save</Button>
+                        <Button size="sm" className="h-7 text-xs gradient-primary px-2" onClick={() => updateUserRole.mutate({ userId: p.user_id, role: editRole })}><Save className="h-3 w-3 mr-1" />Save</Button>
                         <Button size="sm" variant="ghost" className="h-7 px-1" onClick={() => setEditingRoleId(null)}><X className="h-3 w-3" /></Button>
                       </>
                     ) : (
@@ -756,6 +873,161 @@ const AdminPanel = () => {
               )}
             </div>
             <p className="text-xs text-muted-foreground">Your own account is not listed and cannot be self-deleted.</p>
+          </div>
+        </TabsContent>
+        {/* ── TIME LOGS APPROVAL ── */}
+        <TabsContent value="timelogs" className="space-y-4">
+          <div className="glass-card p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><ClipboardList className="h-4 w-4 text-primary" /> Manual Time Logs</h3>
+              <Select value={tlStatusFilter} onValueChange={setTlStatusFilter}>
+                <SelectTrigger className="bg-secondary border-border text-xs h-7 w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              {(adminTimeLogs as any[]).map((log: any) => (
+                <div key={log.id} className="rounded-lg border border-border/50 bg-secondary/40 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">{(log.profiles as any)?.display_name || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground">{log.date} · {log.start_time?.slice(0,5)}–{log.end_time?.slice(0,5)} · {Math.floor(log.duration_minutes/60)}h {log.duration_minutes%60}m</p>
+                      <p className="text-xs text-muted-foreground">{(log.tasks as any)?.name || log.description || "No task"}</p>
+                      {log.admin_note && <p className="text-xs text-muted-foreground italic">Note: {log.admin_note}</p>}
+                    </div>
+                    <StatusBadge status={log.status} />
+                  </div>
+                  {log.status === "pending" && (
+                    tlReviewingId === log.id ? (
+                      <div className="space-y-2 pt-1 border-t border-border/50">
+                        <Input value={tlAdminNote} onChange={e => setTlAdminNote(e.target.value)} placeholder="Admin note (optional)" className="bg-card border-border text-xs h-7" />
+                        <div className="flex gap-2">
+                          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                            onClick={() => reviewTimeLog.mutate({ id: log.id, status: "approved", note: tlAdminNote })}>
+                            <CheckCircle2 className="h-3 w-3" /> Approve
+                          </Button>
+                          <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
+                            onClick={() => reviewTimeLog.mutate({ id: log.id, status: "rejected", note: tlAdminNote })}>
+                            <XCircle className="h-3 w-3" /> Reject
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => { setTlReviewingId(null); setTlAdminNote(""); }}><X className="h-3 w-3" /></Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setTlReviewingId(log.id); setTlAdminNote(""); }}>Review</Button>
+                    )
+                  )}
+                </div>
+              ))}
+              {(adminTimeLogs as any[]).length === 0 && <p className="text-xs text-muted-foreground text-center py-6">No time logs for this filter</p>}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ── LEAVES APPROVAL + ALLOCATION ── */}
+        <TabsContent value="leaves" className="space-y-4">
+          {/* Leave requests */}
+          <div className="glass-card p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2"><CalendarDays className="h-4 w-4 text-primary" /> Leave Requests</h3>
+              <Select value={leaveStatusFilter} onValueChange={setLeaveStatusFilter}>
+                <SelectTrigger className="bg-secondary border-border text-xs h-7 w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              {(adminLeaves as any[]).map((leave: any) => (
+                <div key={leave.id} className="rounded-lg border border-border/50 bg-secondary/40 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: leave.leave_types?.color || "#A855F7" }} />
+                        <p className="text-sm font-medium text-foreground">{(leave.profiles as any)?.display_name || "Unknown"}</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{leave.leave_types?.name} · {leave.start_date}{leave.start_date !== leave.end_date ? ` – ${leave.end_date}` : ""} · {leave.days_requested} day{leave.days_requested !== 1 ? "s" : ""}</p>
+                      {leave.reason && <p className="text-xs text-muted-foreground italic">{leave.reason}</p>}
+                      {leave.admin_note && <p className="text-xs text-muted-foreground italic">Note: {leave.admin_note}</p>}
+                    </div>
+                    <StatusBadge status={leave.status} />
+                  </div>
+                  {leave.status === "pending" && (
+                    leaveReviewingId === leave.id ? (
+                      <div className="space-y-2 pt-1 border-t border-border/50">
+                        <Input value={leaveAdminNote} onChange={e => setLeaveAdminNote(e.target.value)} placeholder="Admin note (optional)" className="bg-card border-border text-xs h-7" />
+                        <div className="flex gap-2">
+                          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                            onClick={() => reviewLeave.mutate({ id: leave.id, status: "approved", note: leaveAdminNote })}>
+                            <CheckCircle2 className="h-3 w-3" /> Approve
+                          </Button>
+                          <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
+                            onClick={() => reviewLeave.mutate({ id: leave.id, status: "rejected", note: leaveAdminNote })}>
+                            <XCircle className="h-3 w-3" /> Reject
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => { setLeaveReviewingId(null); setLeaveAdminNote(""); }}><X className="h-3 w-3" /></Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setLeaveReviewingId(leave.id); setLeaveAdminNote(""); }}>Review</Button>
+                    )
+                  )}
+                </div>
+              ))}
+              {(adminLeaves as any[]).length === 0 && <p className="text-xs text-muted-foreground text-center py-6">No leave requests</p>}
+            </div>
+          </div>
+
+          {/* Leave Allocation */}
+          <div className="glass-card p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">Set Monthly Leave Allocation</h3>
+            <p className="text-xs text-muted-foreground">1 = full day, 0.5 = half day. Set per user, per leave type, per month.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Select value={allocUserId} onValueChange={setAllocUserId}>
+                <SelectTrigger className="bg-secondary border-border text-xs h-8"><SelectValue placeholder="User" /></SelectTrigger>
+                <SelectContent>
+                  {visibleProfiles.map((p: any) => <SelectItem key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={allocTypeId} onValueChange={setAllocTypeId}>
+                <SelectTrigger className="bg-secondary border-border text-xs h-8"><SelectValue placeholder="Leave type" /></SelectTrigger>
+                <SelectContent>
+                  {(leaveTypes as any[]).map((t: any) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={allocMonth} onValueChange={setAllocMonth}>
+                <SelectTrigger className="bg-secondary border-border text-xs h-8"><SelectValue placeholder="Month" /></SelectTrigger>
+                <SelectContent>
+                  {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m,i) => <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={allocYear} onChange={e => setAllocYear(e.target.value)} placeholder="Year" type="number" className="bg-secondary border-border text-xs h-8" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Input value={allocDays} onChange={e => setAllocDays(e.target.value)} placeholder="Days (e.g. 1, 0.5)" type="number" step="0.5" min="0" className="bg-secondary border-border text-xs h-8 w-32" />
+              <Button size="sm" className="gradient-primary h-8 text-xs" onClick={() => saveAllocation.mutate()} disabled={saveAllocation.isPending}>Save Allocation</Button>
+            </div>
+            {/* Existing allocations */}
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {(allAllocations as any[]).map((a: any) => (
+                <div key={a.id} className="flex items-center justify-between py-1 px-2 rounded bg-secondary/50 text-xs">
+                  <span className="text-foreground font-medium">{(a.profiles as any)?.display_name || "?"}</span>
+                  <span className="text-muted-foreground">{a.leave_types?.name}</span>
+                  <span className="text-muted-foreground">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][a.month-1]} {a.year}</span>
+                  <span className="text-primary font-mono">{a.days_allocated}d</span>
+                  <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => deleteAllocation.mutate(a.id)}><Trash2 className="h-3 w-3" /></Button>
+                </div>
+              ))}
+              {(allAllocations as any[]).length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No allocations set</p>}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
