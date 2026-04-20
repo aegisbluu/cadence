@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Settings, ListTodo, Trash2, Pencil, Plus, Activity, Clock,
   CheckCircle2, Building2, Save, X, Shield, FileText, UserMinus, AlertTriangle,
-  ClipboardList, CalendarDays, XCircle, AlertCircle
+  ClipboardList, CalendarDays, XCircle, AlertCircle, Camera
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -111,12 +111,14 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
-      if (data) {
-        const map: Record<string, string> = {};
-        for (const u of data) map[u.id] = u.email;
-        return map;
-      }
+      try {
+        const { data } = await supabase.rpc("get_user_emails");
+        if (data) {
+          const map: Record<string, string> = {};
+          for (const u of data as any[]) map[u.id] = u.email;
+          return map;
+        }
+      } catch {}
       return {} as Record<string, string>;
     },
     enabled: !!user,
@@ -289,8 +291,8 @@ const AdminPanel = () => {
 
   const updateUserRole = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
-      await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
+      await supabase.from("user_roles").upsert({ user_id: userId, role: role as "admin" | "user" }, { onConflict: "user_id,role" });
+      await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role as "admin" | "user");
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
   });
