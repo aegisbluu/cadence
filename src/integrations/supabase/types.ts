@@ -119,6 +119,180 @@ export type Database = {
         }
         Relationships: []
       }
+      leave_allocations: {
+        Row: {
+          created_at: string
+          days_allocated: number
+          id: string
+          leave_type_id: string
+          month: number
+          user_id: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          days_allocated?: number
+          id?: string
+          leave_type_id: string
+          month: number
+          user_id: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          days_allocated?: number
+          id?: string
+          leave_type_id?: string
+          month?: number
+          user_id?: string
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_allocations_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_requests: {
+        Row: {
+          admin_note: string | null
+          created_at: string
+          days_requested: number
+          end_date: string
+          id: string
+          leave_type_id: string
+          reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          admin_note?: string | null
+          created_at?: string
+          days_requested: number
+          end_date: string
+          id?: string
+          leave_type_id: string
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          admin_note?: string | null
+          created_at?: string
+          days_requested?: number
+          end_date?: string
+          id?: string
+          leave_type_id?: string
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_requests_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_types: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      manual_time_logs: {
+        Row: {
+          admin_note: string | null
+          created_at: string
+          date: string
+          description: string | null
+          duration_minutes: number
+          end_time: string
+          id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          start_time: string
+          status: string
+          task_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          admin_note?: string | null
+          created_at?: string
+          date: string
+          description?: string | null
+          duration_minutes: number
+          end_time: string
+          id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_time: string
+          status?: string
+          task_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          admin_note?: string | null
+          created_at?: string
+          date?: string
+          description?: string | null
+          duration_minutes?: number
+          end_time?: string
+          id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_time?: string
+          status?: string
+          task_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manual_time_logs_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
