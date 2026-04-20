@@ -158,28 +158,34 @@ const AdminPanel = () => {
 
   // Admin time logs
   const { data: adminTimeLogs = [], refetch: refetchTimeLogs } = useQuery({
-    queryKey: ["admin_time_logs", tlStatusFilter],
+    queryKey: ["admin_time_logs", tlStatusFilter, (allProfiles as any[]).length],
     queryFn: async () => {
       let q = supabase.from("manual_time_logs")
-        .select("*, tasks(name), profiles!manual_time_logs_user_id_fkey(display_name)")
+        .select("*, tasks(name)")
         .order("date", { ascending: false }).order("start_time");
       if (tlStatusFilter !== "all") q = q.eq("status", tlStatusFilter);
-      const { data } = await q;
-      return data || [];
+      const { data, error } = await q;
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
 
   // Admin leave requests
   const { data: adminLeaves = [], refetch: refetchLeaves } = useQuery({
-    queryKey: ["admin_leaves", leaveStatusFilter],
+    queryKey: ["admin_leaves", leaveStatusFilter, (allProfiles as any[]).length],
     queryFn: async () => {
       let q = supabase.from("leave_requests")
-        .select("*, leave_types(name, color), profiles!leave_requests_user_id_fkey(display_name)")
+        .select("*, leave_types(name, color)")
         .order("created_at", { ascending: false });
       if (leaveStatusFilter !== "all") q = q.eq("status", leaveStatusFilter);
-      const { data } = await q;
-      return data || [];
+      const { data, error } = await q;
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
@@ -193,12 +199,15 @@ const AdminPanel = () => {
 
   // Leave allocations
   const { data: allAllocations = [], refetch: refetchAllocations } = useQuery({
-    queryKey: ["admin_allocations"],
+    queryKey: ["admin_allocations", (allProfiles as any[]).length],
     queryFn: async () => {
-      const { data } = await supabase.from("leave_allocations")
-        .select("*, leave_types(name, color), profiles!leave_allocations_user_id_fkey(display_name)")
+      const { data, error } = await supabase.from("leave_allocations")
+        .select("*, leave_types(name, color)")
         .order("year", { ascending: false }).order("month", { ascending: false });
-      return data || [];
+      if (error) throw error;
+      const pmap: Record<string, string> = {};
+      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
+      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
     },
     enabled: !!user,
   });
