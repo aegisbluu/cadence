@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Settings, ListTodo, Trash2, Pencil, Plus, Activity, Clock,
   CheckCircle2, Building2, Save, X, Shield, FileText, UserMinus, AlertTriangle,
-  ClipboardList, CalendarDays, XCircle, AlertCircle, Camera
+  ClipboardList, CalendarDays, XCircle, AlertCircle
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -41,8 +41,6 @@ const AdminPanel = () => {
   const [editRole, setEditRole] = useState("user");
 
   // Screenshot state
-  const [expandedSs, setExpandedSs] = useState<string|null>(null);
-  const [ssUserFilter, setSsUserFilter] = useState("all");
 
   // Administration state
   const [deleteConfirmUserId, setDeleteConfirmUserId] = useState<string|null>(null);
@@ -111,14 +109,12 @@ const AdminPanel = () => {
       // Use a workaround: fetch from time_entries or dtr_log which have user_id
       // Best approach: fetch profiles and use display_name; for email we need RPC
       // Since Supabase admin API isn't available client-side, we'll use a raw query
-      try {
-        const { data } = await supabase.rpc("get_user_emails");
-        if (data) {
-          const map: Record<string, string> = {};
-          for (const u of data as any[]) map[u.id] = u.email;
-          return map;
-        }
-      } catch {}
+      const { data } = await supabase.rpc("get_user_emails").catch(() => ({ data: null }));
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const u of data) map[u.id] = u.email;
+        return map;
+      }
       return {} as Record<string, string>;
     },
     enabled: !!user,
@@ -158,34 +154,28 @@ const AdminPanel = () => {
 
   // Admin time logs
   const { data: adminTimeLogs = [], refetch: refetchTimeLogs } = useQuery({
-    queryKey: ["admin_time_logs", tlStatusFilter, (allProfiles as any[]).length],
+    queryKey: ["admin_time_logs", tlStatusFilter],
     queryFn: async () => {
       let q = supabase.from("manual_time_logs")
-        .select("*, tasks(name)")
+        .select("*, tasks(name), profiles!manual_time_logs_user_id_fkey(display_name)")
         .order("date", { ascending: false }).order("start_time");
       if (tlStatusFilter !== "all") q = q.eq("status", tlStatusFilter);
-      const { data, error } = await q;
-      if (error) throw error;
-      const pmap: Record<string, string> = {};
-      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
-      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
+      const { data } = await q;
+      return data || [];
     },
     enabled: !!user,
   });
 
   // Admin leave requests
   const { data: adminLeaves = [], refetch: refetchLeaves } = useQuery({
-    queryKey: ["admin_leaves", leaveStatusFilter, (allProfiles as any[]).length],
+    queryKey: ["admin_leaves", leaveStatusFilter],
     queryFn: async () => {
       let q = supabase.from("leave_requests")
-        .select("*, leave_types(name, color)")
+        .select("*, leave_types(name, color), profiles!leave_requests_user_id_fkey(display_name)")
         .order("created_at", { ascending: false });
       if (leaveStatusFilter !== "all") q = q.eq("status", leaveStatusFilter);
-      const { data, error } = await q;
-      if (error) throw error;
-      const pmap: Record<string, string> = {};
-      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
-      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
+      const { data } = await q;
+      return data || [];
     },
     enabled: !!user,
   });
@@ -199,15 +189,12 @@ const AdminPanel = () => {
 
   // Leave allocations
   const { data: allAllocations = [], refetch: refetchAllocations } = useQuery({
-    queryKey: ["admin_allocations", (allProfiles as any[]).length],
+    queryKey: ["admin_allocations"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("leave_allocations")
-        .select("*, leave_types(name, color)")
+      const { data } = await supabase.from("leave_allocations")
+        .select("*, leave_types(name, color), profiles!leave_allocations_user_id_fkey(display_name)")
         .order("year", { ascending: false }).order("month", { ascending: false });
-      if (error) throw error;
-      const pmap: Record<string, string> = {};
-      for (const p of allProfiles as any[]) pmap[p.user_id] = p.display_name || "Unknown";
-      return (data || []).map(d => ({ ...d, display_name: pmap[d.user_id] || "Unknown" }));
+      return data || [];
     },
     enabled: !!user,
   });
@@ -229,23 +216,6 @@ const AdminPanel = () => {
     enabled: !!user && (allProfiles as any[]).length > 0,
   });
 
-  // Screenshots — filter by user
-  const { data: screenshots = [], refetch: refetchSs } = useQuery({
-    queryKey: ["admin_screenshots", ssUserFilter],
-    queryFn: async () => {
-      let q = supabase
-        .from("screenshots")
-        .select("id, user_id, taken_at, timer_elapsed, task_id, image_data, tasks(name)")
-        .order("taken_at", { ascending: false })
-        .limit(100);
-      if (ssUserFilter !== "all") q = q.eq("user_id", ssUserFilter);
-      const { data } = await q;
-      const profileMap: Record<string, string> = {};
-      for (const p of allProfiles as any[]) profileMap[p.user_id] = p.display_name || "Unknown";
-      return (data || []).map(s => ({ ...s, display_name: profileMap[s.user_id] || "Unknown" }));
-    },
-    enabled: !!user && (allProfiles as any[]).length > 0,
-  });
 
   // Realtime subscriptions
   useEffect(() => {
@@ -300,37 +270,14 @@ const AdminPanel = () => {
 
   const updateUserRole = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      await supabase.from("user_roles").upsert({ user_id: userId, role: role as "admin" | "user" }, { onConflict: "user_id,role" });
-      await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role as "admin" | "user");
+      await supabase.from("user_roles").upsert({ user_id: userId, role: role as any }, { onConflict: "user_id,role" });
+      await supabase.from("user_roles").delete().eq("user_id", userId).neq("role", role);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_roles"] }); setEditingRoleId(null); toast({ title: "Role updated" }); },
   });
 
-  const updateScreenshot = useMutation({
-    mutationFn: async ({ userId, interval }: { userId: string; interval: number }) => {
-      const { error } = await supabase.from("profiles").update({ screenshot_interval: interval }).eq("user_id", userId);
-      if (error) throw error;
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin_profiles"] }); toast({ title: "Saved!" }); },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
 
-  const deleteAllScreenshots = useMutation({
-    mutationFn: async () => {
-      let q = supabase.from("screenshots").delete();
-      if (ssUserFilter !== "all") q = (q as any).eq("user_id", ssUserFilter);
-      else q = (q as any).neq("id", "00000000-0000-0000-0000-000000000000"); // delete all
-      const { error } = await q;
-      if (error) throw error;
-    },
-    onSuccess: () => { refetchSs(); toast({ title: "Screenshots deleted" }); },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
 
-  const deleteSingleScreenshot = useMutation({
-    mutationFn: async (id: string) => { await supabase.from("screenshots").delete().eq("id", id); },
-    onSuccess: () => refetchSs(),
-  });
 
   const deleteAccount = useMutation({
     mutationFn: async (userId: string) => {
@@ -445,47 +392,22 @@ const AdminPanel = () => {
         </div>
       )}
 
-      {/* Screenshot expanded lightbox */}
-      {expandedSs && (() => {
-        const s = (screenshots as any[]).find((x: any) => x.id === expandedSs);
-        if (!s) return null;
-        return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm" onClick={() => setExpandedSs(null)}>
-            <div className="bg-card border border-border rounded-xl p-3 max-w-4xl w-full mx-4 space-y-2" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{s.display_name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(s.taken_at), "MMM d, yyyy h:mm a")}
-                    {s.tasks?.name ? ` · ${s.tasks.name}` : ""}
-                    {s.timer_elapsed ? ` · ${fmtHM(s.timer_elapsed)}` : ""}
-                  </p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setExpandedSs(null)}><X className="h-4 w-4" /></Button>
-              </div>
-              {s.image_data
-                ? <img src={s.image_data} alt="Screenshot" className="w-full rounded border border-border/30 max-h-[70vh] object-contain" />
-                : <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">No image data available</div>
-              }
-            </div>
-          </div>
-        );
-      })()}
+
 
       <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
         <Settings className="h-5 w-5 text-primary" /> Admin Dashboard
       </h2>
 
       <Tabs defaultValue="departments">
-        <TabsList className="bg-secondary mb-4 flex-wrap h-auto gap-1">
-          <TabsTrigger value="departments" className="gap-1 text-xs"><Building2 className="h-3 w-3" /> Departments</TabsTrigger>
-          <TabsTrigger value="live" className="gap-1 text-xs"><Activity className="h-3 w-3" /> Live</TabsTrigger>
-          <TabsTrigger value="dtr" className="gap-1 text-xs"><FileText className="h-3 w-3" /> DTR</TabsTrigger>
-          <TabsTrigger value="roles" className="gap-1 text-xs"><Shield className="h-3 w-3" /> Roles</TabsTrigger>
-          <TabsTrigger value="tasks" className="gap-1 text-xs"><ListTodo className="h-3 w-3" /> Tasks</TabsTrigger>
-          <TabsTrigger value="administration" className="gap-1 text-xs"><UserMinus className="h-3 w-3" /> Administration</TabsTrigger>
-          <TabsTrigger value="timelogs" className="gap-1 text-xs"><ClipboardList className="h-3 w-3" /> Time Logs</TabsTrigger>
-          <TabsTrigger value="leaves" className="gap-1 text-xs"><CalendarDays className="h-3 w-3" /> Leaves</TabsTrigger>
+        <TabsList className="bg-secondary mb-6 flex-wrap h-auto gap-1.5 p-1.5">
+          <TabsTrigger value="departments" className="gap-1.5 text-sm py-2.5 px-4"><Building2 className="h-4 w-4" /> Departments</TabsTrigger>
+          <TabsTrigger value="live" className="gap-1.5 text-sm py-2.5 px-4"><Activity className="h-4 w-4" /> Live</TabsTrigger>
+          <TabsTrigger value="dtr" className="gap-1.5 text-sm py-2.5 px-4"><FileText className="h-4 w-4" /> DTR</TabsTrigger>
+          <TabsTrigger value="roles" className="gap-1.5 text-sm py-2.5 px-4"><Shield className="h-4 w-4" /> Roles</TabsTrigger>
+          <TabsTrigger value="tasks" className="gap-1.5 text-sm py-2.5 px-4"><ListTodo className="h-4 w-4" /> Tasks</TabsTrigger>
+          <TabsTrigger value="administration" className="gap-1.5 text-sm py-2.5 px-4"><UserMinus className="h-4 w-4" /> Administration</TabsTrigger>
+          <TabsTrigger value="timelogs" className="gap-1.5 text-sm py-2.5 px-4"><ClipboardList className="h-4 w-4" /> Time Logs</TabsTrigger>
+          <TabsTrigger value="leaves" className="gap-1.5 text-sm py-2.5 px-4"><CalendarDays className="h-4 w-4" /> Leaves</TabsTrigger>
         </TabsList>
 
         {/* ── DEPARTMENTS ── */}
@@ -772,83 +694,6 @@ const AdminPanel = () => {
           </div>
         </TabsContent>
 
-        {/* ── SCREENSHOTS — grid layout ── */}
-        <TabsContent value="screenshots" className="space-y-4">
-          {/* Capture interval settings — shown first */}
-          <div className="glass-card p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">Capture Intervals</h3>
-            {visibleProfiles.map((p: any) => (
-              <ScreenshotRow key={p.user_id} profile={p} onSave={interval => updateScreenshot.mutate({ userId: p.user_id, interval })} />
-            ))}
-          </div>
-
-          <div className="glass-card p-4 space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Camera className="h-4 w-4 text-primary" /> Screenshots
-              </h3>
-              <div className="flex gap-2 items-center">
-                <Select value={ssUserFilter} onValueChange={setSsUserFilter}>
-                  <SelectTrigger className="bg-secondary border-border text-xs h-7 w-36"><SelectValue placeholder="Filter by user" /></SelectTrigger>
-                  <SelectContent>
-                    {visibleProfiles.map((p: any) => <SelectItem key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {ssUserFilter !== "all" && (
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => setSsUserFilter("all")}>
-                    <X className="h-3 w-3 mr-1" /> Clear
-                  </Button>
-                )}
-                <Button size="sm" variant="outline" className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                  onClick={() => deleteAllScreenshots.mutate()}
-                  disabled={deleteAllScreenshots.isPending}>
-                  <Trash2 className="h-3 w-3 mr-1" /> Delete all
-                </Button>
-              </div>
-            </div>
-
-            {/* Grid layout */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {(screenshots as any[]).map((s: any) => (
-                <div key={s.id} className="group relative rounded-lg border border-border/50 overflow-hidden bg-secondary/50 cursor-pointer"
-                  onClick={() => setExpandedSs(expandedSs === s.id ? null : s.id)}>
-                  {/* Thumbnail */}
-                  <div className="aspect-video bg-secondary flex items-center justify-center overflow-hidden">
-                    {s.image_data ? (
-                      <img
-                        src={s.image_data}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                    ) : (
-                      <Camera className="h-8 w-8 text-muted-foreground/30" />
-                    )}
-                  </div>
-                  {/* Info overlay */}
-                  <div className="p-2">
-                    <p className="text-xs font-medium text-foreground truncate">{s.display_name}</p>
-                    <p className="text-xs text-muted-foreground">{format(new Date(s.taken_at), "MMM d, h:mm a")}</p>
-                    {s.tasks?.name && <p className="text-xs text-primary truncate">↳ {s.tasks.name}</p>}
-                  </div>
-                  {/* Delete button on hover */}
-                  <button
-                    className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-destructive text-white rounded p-1"
-                    onClick={e => { e.stopPropagation(); deleteSingleScreenshot.mutate(s.id); }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-              {(screenshots as any[]).length === 0 && (
-                <div className="col-span-full py-10 text-center text-muted-foreground text-xs">No screenshots found</div>
-              )}
-            </div>
-
-            {/* Expanded view — rendered outside the grid so it always has full data */}
-          </div>
-
-        </TabsContent>
 
         {/* ── ADMINISTRATION ── */}
         <TabsContent value="administration" className="space-y-4">
@@ -906,7 +751,7 @@ const AdminPanel = () => {
                 <div key={log.id} className="rounded-lg border border-border/50 bg-secondary/40 p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground">{log.display_name || "Unknown"}</p>
+                      <p className="text-sm font-medium text-foreground">{(log.profiles as any)?.display_name || "Unknown"}</p>
                       <p className="text-xs text-muted-foreground">{log.date} · {log.start_time?.slice(0,5)}–{log.end_time?.slice(0,5)} · {Math.floor(log.duration_minutes/60)}h {log.duration_minutes%60}m</p>
                       <p className="text-xs text-muted-foreground">{(log.tasks as any)?.name || log.description || "No task"}</p>
                       {log.admin_note && <p className="text-xs text-muted-foreground italic">Note: {log.admin_note}</p>}
@@ -963,7 +808,7 @@ const AdminPanel = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: leave.leave_types?.color || "#A855F7" }} />
-                        <p className="text-sm font-medium text-foreground">{leave.display_name || "Unknown"}</p>
+                        <p className="text-sm font-medium text-foreground">{(leave.profiles as any)?.display_name || "Unknown"}</p>
                       </div>
                       <p className="text-xs text-muted-foreground">{leave.leave_types?.name} · {leave.start_date}{leave.start_date !== leave.end_date ? ` – ${leave.end_date}` : ""} · {leave.days_requested} day{leave.days_requested !== 1 ? "s" : ""}</p>
                       {leave.reason && <p className="text-xs text-muted-foreground italic">{leave.reason}</p>}
@@ -1030,7 +875,7 @@ const AdminPanel = () => {
             <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {(allAllocations as any[]).map((a: any) => (
                 <div key={a.id} className="flex items-center justify-between py-1 px-2 rounded bg-secondary/50 text-xs">
-                  <span className="text-foreground font-medium">{a.display_name || "?"}</span>
+                  <span className="text-foreground font-medium">{(a.profiles as any)?.display_name || "?"}</span>
                   <span className="text-muted-foreground">{a.leave_types?.name}</span>
                   <span className="text-muted-foreground">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][a.month-1]} {a.year}</span>
                   <span className="text-primary font-mono">{a.days_allocated}d</span>
@@ -1042,34 +887,6 @@ const AdminPanel = () => {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
-  );
-};
-
-const ScreenshotRow = ({ profile, onSave }: { profile: any; onSave: (n: number) => void }) => {
-  const [val, setVal] = useState(String(profile.screenshot_interval ?? 600));
-  const [saved, setSaved] = useState(false);
-  return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-secondary/50">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{profile.display_name || "Unnamed"}</p>
-        <p className="text-xs text-muted-foreground">{profile.job_title || "—"}</p>
-      </div>
-      <Select value={val} onValueChange={setVal}>
-        <SelectTrigger className="bg-card border-border text-xs h-7 w-36"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="0">No screenshots</SelectItem>
-          <SelectItem value="60">Every 1 min</SelectItem>
-          <SelectItem value="300">Every 5 min</SelectItem>
-          <SelectItem value="600">Every 10 min</SelectItem>
-          <SelectItem value="900">Every 15 min</SelectItem>
-          <SelectItem value="1800">Every 30 min</SelectItem>
-        </SelectContent>
-      </Select>
-      <Button size="sm" className={`h-7 text-xs px-3 ${saved ? "bg-green-600 hover:bg-green-600" : "gradient-primary"}`}
-        onClick={() => { onSave(parseInt(val)); setSaved(true); setTimeout(() => setSaved(false), 2000); }}>
-        {saved ? "Saved!" : "Save"}
-      </Button>
     </div>
   );
 };
