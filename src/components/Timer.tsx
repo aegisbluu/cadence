@@ -455,71 +455,132 @@ const Timer = ({ onEntryCreated }: TimerProps) => {
           </div>
         </div>
 
-        {/* Today's task log — scope editable, no notes */}
+        {/* Today's tasks — grouped by category, timeline-style */}
         <div>
-          <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1">
-            <Clock className="h-3.5 w-3.5 text-primary" /> Today's Tasks
-          </p>
-          <div className="space-y-1.5 max-h-[320px] overflow-y-auto">
-            {workEntries.map((e: any) => {
-              const isBreakEntry = e.description === "Break time";
-              const isEditing = editingId === e.id;
-              const taskName = e.tasks?.name || (isBreakEntry ? "Break" : "Untitled");
-              const scopeVal = !isBreakEntry && e.description && e.description !== "Break time" ? e.description : "";
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5 text-primary" /> Today's Tasks
+            </p>
+            {workEntries.filter((e: any) => e.description !== "Break time").length > 0 && (
+              <span className="text-xs font-mono text-muted-foreground">
+                {fmtHM(workEntries.reduce((s: number, e: any) => s + (e.duration_seconds || 0), 0))} total
+              </span>
+            )}
+          </div>
+          <div className="space-y-3 max-h-[380px] overflow-y-auto pr-0.5">
+            {(() => {
+              // Group entries by category
+              const nonBreak = workEntries.filter((e: any) => e.description !== "Break time");
+              const breaks = workEntries.filter((e: any) => e.description === "Break time");
+              const CATEGORY_COLORS: Record<string, string> = {
+                "Development": "#3B82F6", "Design": "#A855F7", "Research": "#10B981",
+                "Meeting": "#F97316",    "Admin": "#6B7280",   "Other": "#64748B",
+              };
+              const getColor = (cat: string) => CATEGORY_COLORS[cat] || "#A855F7";
+
+              // Build category groups
+              const groups: Record<string, any[]> = {};
+              for (const e of nonBreak) {
+                const cat = e.tasks?.category || "Other";
+                if (!groups[cat]) groups[cat] = [];
+                groups[cat].push(e);
+              }
 
               return (
-                <div key={e.id} className={`rounded-lg border px-3 py-2 ${isBreakEntry ? "border-yellow-400/40 bg-yellow-400/5" : "border-border/50 bg-secondary/50"}`}>
-                  {isEditing ? (
-                    <div className="space-y-2">
+                <>
+                  {Object.entries(groups).map(([cat, entries]) => {
+                    const color = getColor(cat);
+                    const catTotal = entries.reduce((s: number, e: any) => s + (e.duration_seconds || 0), 0);
+                    return (
+                      <div key={cat} className="relative pl-3" style={{ borderLeft: `2px solid ${color}40` }}>
+                        {/* Category header */}
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                          <span className="text-xs font-semibold" style={{ color }}>{cat}</span>
+                          <span className="text-xs text-muted-foreground ml-auto font-mono">{fmtHM(catTotal)}</span>
+                        </div>
+                        {/* Entries in this category */}
+                        <div className="space-y-1 ml-1">
+                          {entries.map((e: any) => {
+                            const isEditing = editingId === e.id;
+                            const taskName = e.tasks?.name || "Untitled";
+                            const scopeVal = e.description && e.description !== "Break time" ? e.description : "";
+                            return (
+                              <div key={e.id} className="rounded-lg bg-secondary/50 border border-border/40 px-2.5 py-2">
+                                {isEditing ? (
+                                  <div className="space-y-2">
+                                    <p className="text-xs font-medium text-foreground truncate">{taskName}</p>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <div>
+                                        <p className="text-xs text-muted-foreground mb-0.5">Duration</p>
+                                        <Input value={editDur} onChange={ev => setEditDur(ev.target.value)} className="bg-card border-border text-xs h-6" placeholder="1h 30m" />
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-muted-foreground mb-0.5">Scope</p>
+                                        <Input value={editScope} onChange={ev => setEditScope(ev.target.value)} className="bg-card border-border text-xs h-6" placeholder="Notes…" />
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-1">
+                                      <Button size="sm" className="h-6 text-xs gradient-primary px-2 gap-1"
+                                        onClick={() => updateEntry.mutate({ id: e.id, duration_seconds: parseDur(editDur), description: editScope })}>
+                                        <Save className="h-3 w-3" /> Save
+                                      </Button>
+                                      <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => setEditingId(null)}>
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-medium text-foreground truncate">{taskName}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {format(new Date(e.start_time), "h:mm a")}
+                                        {e.end_time ? ` – ${format(new Date(e.end_time), "h:mm a")}` : ""}
+                                      </p>
+                                      {scopeVal && <p className="text-xs text-muted-foreground/70 italic truncate">"{scopeVal}"</p>}
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      <span className="text-xs font-mono text-foreground">{fmtHM(e.duration_seconds || 0)}</span>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                        onClick={() => { setEditingId(e.id); setEditDur(fmtHM(e.duration_seconds || 0)); setEditScope(scopeVal); }}>
+                                        <Pencil className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Breaks — compact row at bottom */}
+                  {breaks.length > 0 && (
+                    <div className="relative pl-3" style={{ borderLeft: "2px solid #FBBF2440" }}>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-medium text-foreground flex-1 truncate">{taskName}</span>
-                        <span className="text-xs text-muted-foreground">{format(new Date(e.start_time), "h:mm a")}</span>
+                        <Coffee className="h-3 w-3 text-yellow-500" />
+                        <span className="text-xs font-semibold text-yellow-500">Breaks</span>
+                        <span className="text-xs text-muted-foreground ml-auto font-mono">{fmtHM(breaks.reduce((s: number, e: any) => s + (e.duration_seconds || 0), 0))}</span>
                       </div>
-                      <div className="space-y-1.5">
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Duration (e.g. 1h 30m)</p>
-                          <Input value={editDur} onChange={ev => setEditDur(ev.target.value)} className="bg-card border-border text-xs h-7" placeholder="1h 30m" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Scope / notes</p>
-                          <Input value={editScope} onChange={ev => setEditScope(ev.target.value)} className="bg-card border-border text-xs h-7" placeholder="What did you work on?" />
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button size="sm" className="h-6 text-xs gradient-primary px-2 gap-1"
-                          onClick={() => updateEntry.mutate({ id: e.id, duration_seconds: parseDur(editDur), description: editScope })}>
-                          <Save className="h-3 w-3" /> Save
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => setEditingId(null)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          {isBreakEntry && <Coffee className="h-3 w-3 text-yellow-500 flex-shrink-0" />}
-                          <p className={`text-xs font-medium truncate ${isBreakEntry ? "text-yellow-500" : "text-foreground"}`}>{taskName}</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{e.tasks?.category || (isBreakEntry ? "Break" : "—")} · {format(new Date(e.start_time), "h:mm a")}</p>
-                        {scopeVal && <p className="text-xs text-muted-foreground italic truncate">"{scopeVal}"</p>}
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="text-xs font-mono text-foreground">{fmtHM(e.duration_seconds || 0)}</span>
-                        {!isBreakEntry && (
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                            onClick={() => { setEditingId(e.id); setEditDur(fmtHM(e.duration_seconds || 0)); setEditScope(scopeVal); }}>
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                        )}
+                      <div className="ml-1 flex flex-wrap gap-1.5">
+                        {breaks.map((e: any) => (
+                          <span key={e.id} className="text-xs bg-yellow-400/10 text-yellow-600 border border-yellow-400/20 rounded px-2 py-0.5 font-mono">
+                            {format(new Date(e.start_time), "h:mm a")} · {fmtHM(e.duration_seconds || 0)}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   )}
-                </div>
+
+                  {workEntries.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-4">No tasks logged today</p>
+                  )}
+                </>
               );
-            })}
-            {workEntries.length === 0 && <p className="text-xs text-muted-foreground text-center py-3">No tasks logged today</p>}
+            })()}
           </div>
         </div>
       </div>
